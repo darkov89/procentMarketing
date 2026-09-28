@@ -1,0 +1,35 @@
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Environment variables and secrets
+.env
+.env.local
+
+# Databases
+*.db
+*.sqlite3
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Testing & Linting
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local Generated Data / Output files
+leads*.xlsx
+site/
+STOP
+
+# OS files
+.DS_Store
+Thumbs.db

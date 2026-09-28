@@ -1,0 +1,66 @@
+# Konfiguracja branż: czarna lista, priorytety i mapowanie modułów do ofert
+
+# Twardo odrzucane branże (Blacklist) - natychmiastowa dyskwalifikacja w M2
+blacklisted_keywords:
+  - "barber"
+  - "fryzjer"
+  - "fryzjerstwo"
+  - "hydraulik"
+  - "instalator sanitarny"
+  - "instalacje sanitarne"
+  - "sklep obuwniczy"
+  - "obuwie"
+  - "salon paznokci"
+  - "stylizacja paznokci"
+  - "manicure"
+  - "pedicure"
+  - "kebab"
+  - "pizzeria"
+  - "fast food"
+  - "sklep spożywczy"
+  - "monopolowy"
+
+# Branże priorytetowe i ich wagi scoringowe
+priority_industries:
+  medical_dental:
+    name: "Gabinety i kliniki medyczne / stomatologiczne"
+    keywords: ["stomatolog", "dentysta", "klinika", "gabinet", "fizjoterapia", "fizjoterapeuta", "weterynarz", "przychodnia"]
+    default_modules:
+      - "rezerwacja_online"
+      - "automatyczne_przypomnienia_sms"
+      - "chatbot_faq_pacjenta"
+  accounting_legal:
+    name: "Biura rachunkowe, doradcy podatkowi i kancelarie"
+    keywords: ["biuro rachunkowe", "księgowość", "kancelaria", "radca prawny", "adwokat", "doradca podatkowy"]
+    default_modules:
+      - "automatyczny_obieg_dokumentow"
+      - "kwalifikacja_zapytan_klientow"
+      - "kalendarz_konsultacji"
+  real_estate:
+    name: "Pośrednictwo nieruchomości"
+    keywords: ["nieruchomości", "biuro nieruchomości", "agencja nieruchomości", "pośrednik"]
+    default_modules:
+      - "inteligentne_formularze_ofert"
+      - "auto_odpowiedz_i_sms"
+      - "integracja_crm"
+  construction_energy:
+    name: "Instalatorzy OZE / PV, klimatyzacja i budownictwo"
+    keywords: ["fotowoltaika", "pompy ciepła", "klimatyzacja", "instalacje elektryczne", "firma budowlana", "remonty", "dachy"]
+    default_modules:
+      - "kalkulator_i_wycena_online"
+      - "przechwytywanie_leadow_24_7"
+      - "automatyczny_followup"
+  education:
+    name: "Szkoły językowe i nauka jazdy"
+    keywords: ["szkoła językowa", "nauka jazdy", "kursy językowe", "osk", "szkolenia"]
+    default_modules:
+      - "zapisy_online"
+      - "system_przypomnien"
+      - "platnosci_online"
+  b2b_services:
+    name: "Usługi B2B i produkcja"
+    keywords: ["b2b", "oprogramowanie", "transport", "spedycja", "doradztwo", "reklama", "agencja", "serwis maszyn"]
+    default_modules:
+      - "generator_ofert_i_brief"
+      - "automatyzacja_procesow_make"
+      - "strona_smart_lead_gen"

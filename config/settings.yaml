@@ -1,0 +1,56 @@
+# Domyślne ustawienia operacyjne systemu Lead Machine
+
+system:
+  live_mode: false
+  approval_mode: "all" # "all", "sample", "off"
+  kill_switch_file: "STOP"
+  timezone: "Europe/Warsaw"
+
+sender:
+  company_name: "AM PROCENT Sp. z o.o."
+  brand_name: "Procent Marketing"
+  address: "ul. M. Rataja 15, 59-220 Legnica"
+  krs: "0001200066"
+  nip: "6912590158"
+  sender_person_name: "Dariusz / Zespół Procent Marketing"
+  sender_email: "kontakt@procentmarketing.pl"
+  sender_phone: "+48 76 000 00 00"
+  privacy_policy_url: "https://procentmarketing.pl/assets/PolitykaPrywatności-RODO.pdf"
+  booking_url: "https://cal.com/procentmarketing/15min"
+
+geo:
+  center_name: "Legnica Rynek"
+  center_lat: 51.2070
+  center_lon: 16.1605
+  radius_km: 30.0
+  excluded_cities:
+    - "Wrocław"
+    - "Wroclaw"
+
+limits:
+  daily_max_emails: 30
+  warmup_schedule:
+    days_1_3: 5
+    days_4_7: 10
+    days_8_14: 20
+  send_window_start: "08:30"
+  send_window_end: "16:00"
+  send_days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+  exclude_polish_holidays: true
+
+scoring:
+  min_qualification_score: 60
+  weights:
+    industry_match_max: 30
+    automation_need_max: 25
+    payment_ability_max: 20
+    reachability_max: 15
+    other_signals_max: 10
+
+followup:
+  business_days_delay: 3
+  max_followups: 1
+
+retention:
+  offer_validity_days: 60
+  lead_inactive_retention_months: 12
