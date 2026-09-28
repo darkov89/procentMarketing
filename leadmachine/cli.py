@@ -469,7 +469,7 @@ def qualify(
     from leadmachine.qualification.qualifier import LeadQualifier
 
     qualifier = LeadQualifier()
-    q_stats = {"qualified": 0, "disqualified": 0}
+    q_stats = {"auto_qualified": 0, "needs_review": 0, "auto_disqualified": 0}
 
     with get_db() as session:
         leads = session.query(Lead).all()
@@ -481,30 +481,38 @@ def qualify(
         table.add_column("ID", style="bold white", width=6)
         table.add_column("Firma", style="bold white", width=25)
         table.add_column("Branża", style="dim", width=18)
-        table.add_column("Status", style="bold", width=14)
+        table.add_column("Decyzja Autonomiczna", style="bold", width=20)
         table.add_column("Score", style="bold cyan", width=10)
-        table.add_column("Uzasadnienie / Powód Odrzucenia", style="white", width=45)
+        table.add_column("Uzasadnienie / Kąt Automatyzacji", style="white", width=45)
 
         for lead in leads:
             # Run qualification
             q_res = qualifier.qualify_lead(lead, lead.audit)
             lead.score = q_res.total_score
+            lead.status = q_res.suggested_status
 
-            if q_res.is_qualified:
-                lead.status = "qualified"
+            if q_res.breakdown:
+                lead.score_breakdown = {
+                    **q_res.breakdown.model_dump(),
+                    "decision": q_res.decision.value,
+                    "confidence": q_res.confidence,
+                    "automation_fit_reasons": q_res.automation_fit_reasons,
+                }
+
+            if q_res.decision.value == "auto_qualified":
                 lead.rejection_reason = None
-                if q_res.breakdown:
-                    lead.score_breakdown = q_res.breakdown.model_dump()
-                q_stats["qualified"] += 1
-                status_styled = "[green]qualified[/green]"
+                q_stats["auto_qualified"] += 1
+                status_styled = "[bold green]🟢 auto_qualified[/bold green]"
                 reason_styled = f"[green]{q_res.breakdown.summary if q_res.breakdown else 'Kwalifikacja OK'}[/green]"
+            elif q_res.decision.value == "needs_review":
+                lead.rejection_reason = q_res.review_reason
+                q_stats["needs_review"] += 1
+                status_styled = "[bold yellow]🟡 needs_review[/bold yellow]"
+                reason_styled = f"[yellow]{q_res.review_reason}[/yellow]"
             else:
-                lead.status = "disqualified"
                 lead.rejection_reason = q_res.rejection_reason
-                if q_res.breakdown:
-                    lead.score_breakdown = q_res.breakdown.model_dump()
-                q_stats["disqualified"] += 1
-                status_styled = "[red]disqualified[/red]"
+                q_stats["auto_disqualified"] += 1
+                status_styled = "[bold red]🔴 auto_disqualified[/bold red]"
                 reason_styled = f"[red]{q_res.rejection_reason}[/red]"
 
             table.add_row(
@@ -522,9 +530,13 @@ def qualify(
 
         console.print(table)
         console.print(
-            f"[bold green]✓ Zakończono kwalifikację: Zakwalifikowane: {q_stats['qualified']}, Odrzucone: {q_stats['disqualified']}[/bold green]"
+            f"[bold green]✓ Zakończono kwalifikację autonomiczną:[/bold green] "
+            f"Auto-Zaakceptowane: [green]{q_stats['auto_qualified']}[/green], "
+            f"Do Weryfikacji: [yellow]{q_stats['needs_review']}[/yellow], "
+            f"Auto-Odrzucone: [red]{q_stats['auto_disqualified']}[/red]"
         )
         console.print(f"[bold green]✓ Zaktualizowano arkusz Excel: {saved_excel}[/bold green]")
+
 
 
 @app.command()

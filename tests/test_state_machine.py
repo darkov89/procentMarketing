@@ -21,6 +21,12 @@ def test_valid_transitions():
     assert transition_lead_state("meeting_booked", "closed_won") == "closed_won"
 
 
+def test_needs_review_transitions():
+    assert transition_lead_state("new", "needs_review") == "needs_review"
+    assert transition_lead_state("needs_review", "qualified") == "qualified"
+    assert transition_lead_state("needs_review", "disqualified") == "disqualified"
+
+
 def test_direct_disqualification():
     assert transition_lead_state("new", "disqualified") == "disqualified"
     assert transition_lead_state("qualified", "disqualified") == "disqualified"

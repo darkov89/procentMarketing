@@ -1,7 +1,8 @@
 """Lead qualification and scoring engine (Hard rules Gate 1 + Subscores Gate 2)."""
 
 import logging
-from typing import Optional, Tuple
+from enum import Enum
+from typing import List, Optional, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -9,6 +10,12 @@ from leadmachine.config import get_industries_config, get_settings
 from leadmachine.db.models import Audit, Lead
 
 logger = logging.getLogger(__name__)
+
+
+class LeadDecision(str, Enum):
+    AUTO_QUALIFIED = "auto_qualified"
+    AUTO_DISQUALIFIED = "auto_disqualified"
+    NEEDS_REVIEW = "needs_review"
 
 
 class ScoreBreakdown(BaseModel):
@@ -42,7 +49,12 @@ class ScoreBreakdown(BaseModel):
 class QualificationResult(BaseModel):
     is_qualified: bool
     total_score: int
+    decision: LeadDecision = LeadDecision.AUTO_DISQUALIFIED
+    suggested_status: str = "disqualified"  # "qualified", "disqualified", "needs_review"
+    confidence: str = "high"  # "high", "medium", "low"
     rejection_reason: Optional[str] = None
+    review_reason: Optional[str] = None
+    automation_fit_reasons: List[str] = Field(default_factory=list)
     breakdown: Optional[ScoreBreakdown] = None
 
 
@@ -54,13 +66,16 @@ class LeadQualifier:
         self.industries_cfg = get_industries_config()
 
     def qualify_lead(self, lead: Lead, audit: Optional[Audit] = None) -> QualificationResult:
-        """Runs two-stage qualification: Gate 1 (hard rules) -> Gate 2 (scoring)."""
+        """Runs multi-stage qualification: Gate 1 (hard rules) -> Gate 2 (scoring) -> Autonomous Decision Matrix."""
         # --- LEVEL 1: HARD RULES GATE ---
         passes_hard, hard_reason = self.check_hard_rules(lead)
         if not passes_hard:
             return QualificationResult(
                 is_qualified=False,
                 total_score=0,
+                decision=LeadDecision.AUTO_DISQUALIFIED,
+                suggested_status="disqualified",
+                confidence="high",
                 rejection_reason=hard_reason,
             )
 
@@ -76,22 +91,127 @@ class LeadQualifier:
             + breakdown.other_signals
         )
 
-        threshold = self.settings.scoring.min_qualification_score
+        # Extract concrete automation fit angles based strictly on verifiable facts
+        automation_fit_reasons = self._extract_automation_angles(lead, audit)
 
-        if total_score >= threshold:
-            return QualificationResult(
-                is_qualified=True,
-                total_score=total_score,
-                breakdown=breakdown,
+        # --- LEVEL 3: AUTONOMOUS DECISION MATRIX ---
+        decision, suggested_status, confidence, rej_reason, rev_reason = (
+            self._determine_autonomous_decision(lead, audit, total_score, breakdown)
+        )
+
+        return QualificationResult(
+            is_qualified=(decision == LeadDecision.AUTO_QUALIFIED),
+            total_score=total_score,
+            decision=decision,
+            suggested_status=suggested_status,
+            confidence=confidence,
+            rejection_reason=rej_reason,
+            review_reason=rev_reason,
+            automation_fit_reasons=automation_fit_reasons,
+            breakdown=breakdown,
+        )
+
+    def _determine_autonomous_decision(
+        self,
+        lead: Lead,
+        audit: Optional[Audit],
+        total_score: int,
+        breakdown: ScoreBreakdown,
+    ) -> Tuple[LeadDecision, str, str, Optional[str], Optional[str]]:
+        """Autonomously decides between AUTO_QUALIFIED, AUTO_DISQUALIFIED, and NEEDS_REVIEW.
+
+        High quality (medical, legal, PV, B2B, strong automation hooks) -> AUTO_QUALIFIED.
+        Low quality / micro retail / no automation potential -> AUTO_DISQUALIFIED.
+        Uncertain / borderline cases -> NEEDS_REVIEW for human signoff.
+        """
+        lead_text = f"{lead.company_name or ''} {lead.industry or ''}".lower()
+        priorities = self.industries_cfg.get("priority_industries", {})
+
+        is_priority = any(
+            any(kw.lower() in lead_text for kw in ind_info.get("keywords", []))
+            for ind_info in priorities.values()
+        )
+
+        # Extra heuristic for micro-retail with negligible automation budget
+        micro_retail_terms = [
+            "sklep", "warzywa", "owoce", "kiosk", "lombard", "szewc",
+            "klucze", "lumpeks", "odzież", "ciuch", "tani", "kwiaciarnia"
+        ]
+        is_micro_retail = any(term in lead_text for term in micro_retail_terms) and not is_priority
+
+        # 1. AUTONOMOUS REJECTION: Poor fit or low score
+        if is_micro_retail and total_score < 60:
+            return (
+                LeadDecision.AUTO_DISQUALIFIED,
+                "disqualified",
+                "high",
+                f"Zbyt niski potencjał automatyzacji B2B (mikro-handel detaliczny). Score: {total_score}/100",
+                None,
             )
+
+        if total_score < 48:
+            return (
+                LeadDecision.AUTO_DISQUALIFIED,
+                "disqualified",
+                "high",
+                f"Score {total_score}/100 poniżej progu opłacalności Procent Marketing (<48 pkt). {breakdown.summary}",
+                None,
+            )
+
+        # 2. AUTONOMOUS APPROVAL: High fit + clear automation ROI
+        # Medical, Dental, Legal, Accounting, PV/HVAC, B2B with score >= 60
+        if is_priority and total_score >= 60:
+            return (
+                LeadDecision.AUTO_QUALIFIED,
+                "qualified",
+                "high",
+                None,
+                None,
+            )
+
+        # General industry with high score (>=68), active company (Sp. z o.o. or high reviews)
+        if total_score >= 68:
+            return (
+                LeadDecision.AUTO_QUALIFIED,
+                "qualified",
+                "high",
+                None,
+                None,
+            )
+
+        # 3. NEEDS REVIEW: Ambiguous / Borderline cases (Score 48-67 in general industry, or incomplete data)
+        return (
+            LeadDecision.NEEDS_REVIEW,
+            "needs_review",
+            "medium",
+            None,
+            f"Niejednoznaczny profil: Score {total_score}/100 w branży '{lead.industry or 'ogólna'}'. Wymaga szybkiej weryfikacji decydenta.",
+        )
+
+    def _extract_automation_angles(self, lead: Lead, audit: Optional[Audit]) -> List[str]:
+        """Extracts specific, high-ROI automation angles grounded in verifiable audit data."""
+        angles = []
+        if audit:
+            if not audit.has_online_booking:
+                angles.append("Wdrożenie rezerwacji wizyt 24/7 (Booksy/Calendly) eliminującej straty po godzinach")
+            if not audit.has_contact_form:
+                angles.append("Stworzenie responsywnego formularza szybkiego briefu / zapytania ofertowego")
+            if audit.copyright_year and audit.copyright_year <= 2022:
+                angles.append(f"Przebudowa przestarzałego serwisu WWW (prawa autorskie z {audit.copyright_year} r.) na nowoczesny silnik")
+            if not audit.has_ga4 and not audit.has_meta_pixel:
+                angles.append("Instalacja analityki konwersji GA4 oraz pikseli retargetingowych")
+            if not audit.is_responsive:
+                angles.append("Optymalizacja mobile-first dla klientów przeglądających ofertę ze smartfonów")
+            if audit.google_reviews_count and audit.google_reviews_count >= 20:
+                angles.append(f"Monetyzacja dużej bazy {audit.google_reviews_count} zadowolonych klientów przez landing page")
         else:
-            reason = f"Score {total_score}/100 poniżej progu kwalifikacji ({threshold}). {breakdown.summary}"
-            return QualificationResult(
-                is_qualified=False,
-                total_score=total_score,
-                rejection_reason=reason,
-                breakdown=breakdown,
-            )
+            angles.append("Wdrożenie nowoczesnej strony www z lekiem generowania leadów dla rynku lokalnego")
+
+        if lead.owner_confidence == "high":
+            angles.append("Bezpośredni kontakt do decydenta w zarządzie ustalony w rejestrze KRS/CEIDG")
+
+        return angles
+
 
     def check_hard_rules(self, lead: Lead) -> Tuple[bool, Optional[str]]:
         """Checks Level 1 hard disqualification rules."""

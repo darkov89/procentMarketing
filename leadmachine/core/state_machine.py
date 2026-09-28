@@ -11,8 +11,9 @@ class InvalidStateTransitionError(ValueError):
 
 # Strict allowed state transitions map
 ALLOWED_TRANSITIONS: Dict[str, Set[str]] = {
-    "new": {"qualified", "disqualified"},
-    "qualified": {"audited", "disqualified"},
+    "new": {"qualified", "disqualified", "needs_review"},
+    "needs_review": {"qualified", "disqualified"},
+    "qualified": {"audited", "offer_draft", "disqualified"},
     "audited": {"offer_draft", "disqualified"},
     "offer_draft": {"offer_approved", "disqualified"},
     "offer_approved": {"offer_published", "disqualified"},

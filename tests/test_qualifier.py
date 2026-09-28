@@ -85,8 +85,88 @@ def test_priority_lead_qualification_and_scoring():
     res = qualifier.qualify_lead(lead, audit)
 
     assert res.is_qualified is True
+    assert res.decision.value == "auto_qualified"
+    assert res.suggested_status == "qualified"
     assert res.total_score >= 60
+    assert len(res.automation_fit_reasons) > 0
+    assert any("rezerwacji" in reason.lower() for reason in res.automation_fit_reasons)
     assert res.breakdown is not None
     assert res.breakdown.industry_match == 30  # Medical is priority!
     assert res.breakdown.automation_need >= 15  # Missing booking and GA4!
     assert res.breakdown.payment_ability >= 12  # Sp. z o.o. + 85 reviews!
+
+
+def test_auto_disqualification_pani_krysia_and_trainers():
+    qualifier = LeadQualifier()
+
+    # Trainer - hard rule
+    lead_trainer = Lead(
+        company_name="Trener Personalny Legnica Tomasz Kloc",
+        industry="Trening personalny i fitness",
+        phone_normalized="+48768000000",
+        city="Legnica",
+        distance_km=2.0,
+    )
+    res_trainer = qualifier.qualify_lead(lead_trainer)
+    assert res_trainer.is_qualified is False
+    assert res_trainer.decision.value == "auto_disqualified"
+    assert res_trainer.suggested_status == "disqualified"
+
+    # Sklep Pani Krysi - micro retail
+    lead_krysia = Lead(
+        company_name="Sklep Spożywczy U Pani Krysi",
+        industry="Handel detaliczny",
+        phone_normalized="+48768000001",
+        city="Legnica",
+        distance_km=1.0,
+    )
+    res_krysia = qualifier.qualify_lead(lead_krysia)
+    assert res_krysia.is_qualified is False
+    assert res_krysia.decision.value == "auto_disqualified"
+    assert res_krysia.suggested_status == "disqualified"
+
+    # Kiosk / Warzywniak
+    lead_warzywa = Lead(
+        company_name="Warzywa i Owoce Świeży Kącik",
+        industry="Warzywniak",
+        phone_normalized="+48768000002",
+        city="Legnica",
+        distance_km=3.0,
+    )
+    res_warzywa = qualifier.qualify_lead(lead_warzywa)
+    assert res_warzywa.is_qualified is False
+    assert res_warzywa.decision.value == "auto_disqualified"
+
+
+def test_needs_review_uncertain_lead():
+    qualifier = LeadQualifier()
+
+    # General non-priority business with mediocre score (uncertain)
+    lead_uncertain = Lead(
+        company_name="Centrum Usług Poligraficznych i Reklamy Jan Nowak",
+        industry="Poligrafia i druk",
+        city="Legnica",
+        distance_km=4.0,
+        phone_normalized="+48768112233",
+        email_primary="biuro@druk-legnica.pl",
+        website="https://druk-legnica.pl",
+        owner_confidence="low",
+    )
+    audit = Audit(
+        ssl_valid=True,
+        is_responsive=True,
+        copyright_year=2023,
+        has_contact_form=True,
+        has_online_booking=False,
+        has_ga4=True,
+        google_rating=4.2,
+        google_reviews_count=8,  # small reviews count
+    )
+
+    res = qualifier.qualify_lead(lead_uncertain, audit)
+    # Total score should be around 50-65, non-priority industry -> NEEDS_REVIEW
+    assert res.decision.value == "needs_review"
+    assert res.suggested_status == "needs_review"
+    assert res.review_reason is not None
+    assert "Niejednoznaczny" in res.review_reason
+
