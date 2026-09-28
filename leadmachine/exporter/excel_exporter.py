@@ -180,8 +180,8 @@ def export_leads_to_excel(leads: List[Lead], output_path: Path) -> Path:
             cell.border = thin_border
             cell.alignment = Alignment(vertical="center")
 
-            # Status column coloring (Column 32: Status leada)
-            if col_idx == 32:
+            # Status column coloring
+            if EXCEL_COLUMNS[col_idx - 1][0] == "Status leada":
                 cell.fill = PatternFill(start_color=row_status_color, end_color=row_status_color, fill_type="solid")
                 cell.font = Font(name="Calibri", size=10, bold=True)
 

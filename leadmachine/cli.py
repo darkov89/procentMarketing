@@ -289,50 +289,218 @@ def forget(
 # Placeholders for future phases
 @app.command()
 def enrich():
-    """Wzbogacanie danych leadów przez CEIDG/KRS/REGON (Faza 2)."""
-    console.print("[cyan]Moduł 'enrich' zostanie zaimplementowany w Fazie 2.[/cyan]")
+    """Wzbogacanie danych leadów przez CEIDG/KRS/REGON z określaniem pewności właściciela."""
+    console.print("[bold yellow]▶ Uruchamianie modułu wzbogacania rejestrowego (CEIDG / KRS)...[/bold yellow]")
+    from leadmachine.enrichment.registry_client import RegistryClient
 
+    reg_client = RegistryClient()
+    updated_count = 0
 
-@app.command()
-def qualify():
-    """Kwalifikacja i scoring marketingowy leadów przez Gemini LLM (Faza 2)."""
-    console.print("[cyan]Moduł 'qualify' zostanie zaimplementowany w Fazie 2.[/cyan]")
+    with get_db() as session:
+        leads = session.query(Lead).filter(Lead.status.in_(["new", "qualified"])).all()
+        if not leads:
+            console.print("[yellow]Brak aktywnych leadów do wzbogacenia.[/yellow]")
+            return
+
+        table = Table(title="Wyniki Wzbogacania Rejestrowego", border_style="cyan")
+        table.add_column("ID", style="bold white", width=6)
+        table.add_column("Firma", style="bold white", width=25)
+        table.add_column("Pewność właściciela", style="bold cyan", width=18)
+        table.add_column("Wykryty właściciel / zarząd", style="green", width=30)
+        table.add_column("Źródło", style="dim", width=15)
+
+        for lead in leads:
+            res = reg_client.lookup(nip=lead.nip, krs=lead.krs, company_name=lead.company_name)
+            if res:
+                if res.owner_name:
+                    lead.owner_confidence = res.owner_confidence
+                    if not lead.contacts:
+                        c = Contact(lead=lead, first_name=res.owner_name, role=res.owner_role, is_primary=True, source=res.source)
+                        session.add(c)
+                    else:
+                        lead.contacts[0].first_name = res.owner_name
+                        lead.contacts[0].role = res.owner_role
+                    updated_count += 1
+                else:
+                    lead.owner_confidence = lead.owner_confidence or res.owner_confidence
+
+                table.add_row(
+                    str(lead.id),
+                    lead.company_name[:24],
+                    lead.owner_confidence or "brak",
+                    f"{res.owner_name or 'Nie wykryto'} ({res.owner_role or '-'})",
+                    res.source,
+                )
+
+        session.commit()
+        console.print(table)
+        console.print(f"[bold green]✓ Zaktualizowano dane właścicieli dla {updated_count} leadów.[/bold green]")
 
 
 @app.command()
 def audit():
-    """Audyt marketingowy witryn WWW leadów (Faza 2)."""
-    console.print("[cyan]Moduł 'audit' zostanie zaimplementowany w Fazie 2.[/cyan]")
+    """Rzetelny mini-audyt marketingowy witryn WWW leadów z gromadzeniem dowodów (evidence)."""
+    console.print("[bold yellow]▶ Uruchamianie mini-audytu marketingowego stron WWW...[/bold yellow]")
+    from leadmachine.audit.web_auditor import WebAuditor
 
+    auditor = WebAuditor()
+    audited_count = 0
 
-@offers_app.command("build")
-def offers_build():
-    """Generowanie spersonalizowanych stron ofert (Faza 3)."""
-    console.print("[cyan]Moduł 'offers build' zostanie zaimplementowany w Fazie 3.[/cyan]")
+    with get_db() as session:
+        leads = session.query(Lead).filter(Lead.website.isnot(None)).all()
+        if not leads:
+            console.print("[yellow]Brak leadów z adresem WWW w bazie.[/yellow]")
+            return
 
+        table = Table(title="Wyniki Audytu Marketingowego WWW", border_style="yellow")
+        table.add_column("ID", style="bold white", width=6)
+        table.add_column("Firma", style="bold white", width=24)
+        table.add_column("SSL", style="cyan", width=8)
+        table.add_column("Mobilność", style="cyan", width=10)
+        table.add_column("CMS", style="magenta", width=12)
+        table.add_column("GA4 / Pixel", style="green", width=14)
+        table.add_column("Rezerwacja", style="green", width=12)
+        table.add_column("Dowody (evidence)", style="dim", width=18)
 
-@offers_app.command("publish")
-def offers_publish():
-    """Publikacja zatwierdzonych ofert na Netlify (Faza 3)."""
-    console.print("[cyan]Moduł 'offers publish' zostanie zaimplementowany w Fazie 3.[/cyan]")
+        for lead in leads:
+            audit_res = auditor.audit_url(lead.website)
+
+            # Save or update Audit record
+            if not lead.audit:
+                a = Audit(
+                    lead=lead,
+                    ssl_valid=audit_res.ssl_valid,
+                    is_responsive=audit_res.is_responsive,
+                    cms_detected=audit_res.cms_detected,
+                    copyright_year=audit_res.copyright_year,
+                    has_ga4=audit_res.has_ga4,
+                    has_gtm=audit_res.has_gtm,
+                    has_meta_pixel=audit_res.has_meta_pixel,
+                    has_contact_form=audit_res.has_contact_form,
+                    has_online_booking=audit_res.has_online_booking,
+                    has_live_chat=audit_res.has_live_chat,
+                    social_links=audit_res.social_links,
+                    emails_scraped=audit_res.emails_scraped,
+                    meta_ads_active=audit_res.meta_ads_active,
+                    raw_evidence=audit_res.evidence,
+                )
+                session.add(a)
+                lead.audit = a
+            else:
+                lead.audit.ssl_valid = audit_res.ssl_valid
+                lead.audit.is_responsive = audit_res.is_responsive
+                lead.audit.cms_detected = audit_res.cms_detected
+                lead.audit.copyright_year = audit_res.copyright_year
+                lead.audit.has_ga4 = audit_res.has_ga4
+                lead.audit.has_gtm = audit_res.has_gtm
+                lead.audit.has_meta_pixel = audit_res.has_meta_pixel
+                lead.audit.has_contact_form = audit_res.has_contact_form
+                lead.audit.has_online_booking = audit_res.has_online_booking
+                lead.audit.has_live_chat = audit_res.has_live_chat
+                lead.audit.social_links = audit_res.social_links
+                lead.audit.emails_scraped = audit_res.emails_scraped
+                lead.audit.raw_evidence = audit_res.evidence
+
+            audited_count += 1
+            ga_str = f"GA4:{'T' if audit_res.has_ga4 else 'N'} | Pix:{'T' if audit_res.has_meta_pixel else 'N'}"
+            table.add_row(
+                str(lead.id),
+                lead.company_name[:23],
+                "TAK" if audit_res.ssl_valid else "NIE",
+                "TAK" if audit_res.is_responsive else "NIE",
+                audit_res.cms_detected or "Nieznany",
+                ga_str,
+                "TAK" if audit_res.has_online_booking else "NIE",
+                f"{len(audit_res.evidence)} faktów z kluczem",
+            )
+
+        session.commit()
+        console.print(table)
+        console.print(f"[bold green]✓ Zakończono audyt marketingowy dla {audited_count} witryn.[/bold green]")
 
 
 @app.command()
-def outreach():
-    """Wysyłka zaproszeń e-mail z kontrolą ChannelGate i limitami (Faza 4)."""
-    console.print("[cyan]Moduł 'outreach' zostanie zaimplementowany w Fazie 4.[/cyan]")
+def qualify(
+    output_excel: Path = typer.Option(
+        Path("leads.xlsx"),
+        "--output",
+        "-o",
+        help="Path for Excel export",
+    ),
+):
+    """Dwupoziomowa kwalifikacja (reguły twarde Gate 1 + scoring marketingowy Gate 2)."""
+    console.print("[bold yellow]▶ Uruchamianie kwalifikacji i scoringu leadów...[/bold yellow]")
+    from leadmachine.qualification.qualifier import LeadQualifier
+
+    qualifier = LeadQualifier()
+    q_stats = {"qualified": 0, "disqualified": 0}
+
+    with get_db() as session:
+        leads = session.query(Lead).all()
+        if not leads:
+            console.print("[yellow]Brak leadów w bazie danych do kwalifikacji.[/yellow]")
+            return
+
+        table = Table(title="Raport Kwalifikacji i Scoringu Leadów", border_style="yellow")
+        table.add_column("ID", style="bold white", width=6)
+        table.add_column("Firma", style="bold white", width=25)
+        table.add_column("Branża", style="dim", width=18)
+        table.add_column("Status", style="bold", width=14)
+        table.add_column("Score", style="bold cyan", width=10)
+        table.add_column("Uzasadnienie / Powód Odrzucenia", style="white", width=45)
+
+        for lead in leads:
+            # Run qualification
+            q_res = qualifier.qualify_lead(lead, lead.audit)
+            lead.score = q_res.total_score
+
+            if q_res.is_qualified:
+                lead.status = "qualified"
+                lead.rejection_reason = None
+                if q_res.breakdown:
+                    lead.score_breakdown = q_res.breakdown.model_dump()
+                q_stats["qualified"] += 1
+                status_styled = "[green]qualified[/green]"
+                reason_styled = f"[green]{q_res.breakdown.summary if q_res.breakdown else 'Kwalifikacja OK'}[/green]"
+            else:
+                lead.status = "disqualified"
+                lead.rejection_reason = q_res.rejection_reason
+                if q_res.breakdown:
+                    lead.score_breakdown = q_res.breakdown.model_dump()
+                q_stats["disqualified"] += 1
+                status_styled = "[red]disqualified[/red]"
+                reason_styled = f"[red]{q_res.rejection_reason}[/red]"
+
+            table.add_row(
+                str(lead.id),
+                lead.company_name[:24],
+                (lead.industry or "-")[:17],
+                status_styled,
+                f"{lead.score}/100",
+                reason_styled[:44],
+            )
+
+        session.commit()
+        # Export updated Excel
+        saved_excel = export_leads_to_excel(leads, output_excel)
+
+        console.print(table)
+        console.print(f"[bold green]✓ Zakończono kwalifikację: Zakwalifikowane: {q_stats['qualified']}, Odrzucone: {q_stats['disqualified']}[/bold green]")
+        console.print(f"[bold green]✓ Zaktualizowano arkusz Excel: {saved_excel}[/bold green]")
 
 
 @app.command()
-def inbox():
-    """Monitorowanie skrzynki i klasyfikacja odpowiedzi przez Gemini (Faza 5)."""
-    console.print("[cyan]Moduł 'inbox' zostanie zaimplementowany w Fazie 5.[/cyan]")
+def ui(
+    port: int = typer.Option(8501, "--port", "-p", help="Port for Streamlit dashboard"),
+):
+    """Uruchamia lokalny interfejs Streamlit do zarządzania leadami i stanami."""
+    console.print(f"[bold yellow]▶ Uruchamianie panelu Lead Machine na porcie {port}...[/bold yellow]")
+    import subprocess
+    import sys
 
-
-@app.command()
-def followups():
-    """Wysyłka follow-upów w wątku po N dniach (Faza 5)."""
-    console.print("[cyan]Moduł 'followups' zostanie zaimplementowany w Fazie 5.[/cyan]")
+    app_path = Path(__file__).parent / "ui" / "app.py"
+    cmd = [sys.executable, "-m", "streamlit", "run", str(app_path), "--server.port", str(port)]
+    subprocess.run(cmd)
 
 
 if __name__ == "__main__":
