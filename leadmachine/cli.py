@@ -42,7 +42,9 @@ def scan(
     ),
 ):
     """Scan and ingest leads from scraper output, applying geo filter and deduplication."""
-    console.print(f"[bold yellow]▶ Uruchamianie Lead Machine Scan[/bold yellow] (Plik: {input_file}, Dry-run: {dry_run})")
+    console.print(
+        f"[bold yellow]▶ Uruchamianie Lead Machine Scan[/bold yellow] (Plik: {input_file}, Dry-run: {dry_run})"
+    )
 
     if not dry_run:
         init_db()
@@ -65,12 +67,14 @@ def scan(
         from sqlalchemy.orm import sessionmaker
 
         from leadmachine.db.models import Base
+
         mem_engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(mem_engine)
         SessionLocal = sessionmaker(bind=mem_engine)
         session = SessionLocal()
     else:
         from leadmachine.db.session import get_engine, get_session_factory
+
         engine = get_engine()
         init_db(engine)
         session = get_session_factory(engine)()
@@ -119,14 +123,16 @@ def scan(
                 status = "disqualified"
                 rejection = dup_reason
             elif not geo_res.is_allowed:
-                status = "disqualified"
                 rejection = geo_res.rejection_reason
                 if "Wrocław" in (rejection or ""):
                     stats["rejected_wroclaw"] += 1
+                    # HARD POLICY: Wrocław leads are completely dropped, never saved in DB or Excel
+                    continue
                 elif "exceeds maximum radius" in (rejection or ""):
                     stats["rejected_distance"] += 1
                 else:
                     stats["rejected_coords"] += 1
+                status = "disqualified"
             else:
                 status = "new"
                 rejection = None
@@ -191,7 +197,9 @@ def scan(
         table.add_row("Wszystkie wczytane rekordy", str(stats["total"]))
         table.add_row("Zaakceptowane (Legnica ≤ 30km)", f"[green]{stats['accepted']}[/green]")
         table.add_row("Odrzucone: Wrocław (Hard Block)", f"[red]{stats['rejected_wroclaw']}[/red]")
-        table.add_row("Odrzucone: Poza promieniem 30km", f"[magenta]{stats['rejected_distance']}[/magenta]")
+        table.add_row(
+            "Odrzucone: Poza promieniem 30km", f"[magenta]{stats['rejected_distance']}[/magenta]"
+        )
         table.add_row("Odrzucone: Brak współrzędnych/miasta", str(stats["rejected_coords"]))
         table.add_row("Odrzucone: Duplikaty", str(stats["duplicates"]))
         table.add_row("Wygenerowany arkusz Excel", f"[bold green]{saved_path}[/bold green]")
@@ -215,7 +223,9 @@ def export(
     with get_db() as session:
         leads = session.query(Lead).all()
         saved_path = export_leads_to_excel(leads, output_excel)
-        console.print(f"[bold green]✓ Wyeksportowano {len(leads)} leadów do: {saved_path}[/bold green]")
+        console.print(
+            f"[bold green]✓ Wyeksportowano {len(leads)} leadów do: {saved_path}[/bold green]"
+        )
 
 
 @app.command()
@@ -239,7 +249,9 @@ def suppress(
             reason=reason,
         )
         session.add(entry)
-        console.print(f"[bold green]✓ Dodano do Suppression List: {email or phone or nip} (Powód: {reason})[/bold green]")
+        console.print(
+            f"[bold green]✓ Dodano do Suppression List: {email or phone or nip} (Powód: {reason})[/bold green]"
+        )
 
 
 @app.command()
@@ -268,8 +280,16 @@ def forget(
         company = lead.company_name
 
         # Ensure hashed entry in suppression
-        h_email = hashlib.sha256(lead.email_primary.lower().encode()).hexdigest() if lead.email_primary else None
-        h_phone = hashlib.sha256(lead.phone_normalized.encode()).hexdigest() if lead.phone_normalized else None
+        h_email = (
+            hashlib.sha256(lead.email_primary.lower().encode()).hexdigest()
+            if lead.email_primary
+            else None
+        )
+        h_phone = (
+            hashlib.sha256(lead.phone_normalized.encode()).hexdigest()
+            if lead.phone_normalized
+            else None
+        )
         h_nip = hashlib.sha256(lead.nip.encode()).hexdigest() if lead.nip else None
 
         suppress_entry = Suppression(
@@ -283,14 +303,18 @@ def forget(
 
         # Delete lead and cascades
         session.delete(lead)
-        console.print(f"[bold green]✓ Pomyślnie zrealizowano prawo do bycia zapomnianym dla: '{company}' (Lead #{lead_id}). Dane osobowe usunięte.[/bold green]")
+        console.print(
+            f"[bold green]✓ Pomyślnie zrealizowano prawo do bycia zapomnianym dla: '{company}' (Lead #{lead_id}). Dane osobowe usunięte.[/bold green]"
+        )
 
 
 # Placeholders for future phases
 @app.command()
 def enrich():
     """Wzbogacanie danych leadów przez CEIDG/KRS/REGON z określaniem pewności właściciela."""
-    console.print("[bold yellow]▶ Uruchamianie modułu wzbogacania rejestrowego (CEIDG / KRS)...[/bold yellow]")
+    console.print(
+        "[bold yellow]▶ Uruchamianie modułu wzbogacania rejestrowego (CEIDG / KRS)...[/bold yellow]"
+    )
     from leadmachine.enrichment.registry_client import RegistryClient
 
     reg_client = RegistryClient()
@@ -315,7 +339,13 @@ def enrich():
                 if res.owner_name:
                     lead.owner_confidence = res.owner_confidence
                     if not lead.contacts:
-                        c = Contact(lead=lead, first_name=res.owner_name, role=res.owner_role, is_primary=True, source=res.source)
+                        c = Contact(
+                            lead=lead,
+                            first_name=res.owner_name,
+                            role=res.owner_role,
+                            is_primary=True,
+                            source=res.source,
+                        )
                         session.add(c)
                     else:
                         lead.contacts[0].first_name = res.owner_name
@@ -334,13 +364,17 @@ def enrich():
 
         session.commit()
         console.print(table)
-        console.print(f"[bold green]✓ Zaktualizowano dane właścicieli dla {updated_count} leadów.[/bold green]")
+        console.print(
+            f"[bold green]✓ Zaktualizowano dane właścicieli dla {updated_count} leadów.[/bold green]"
+        )
 
 
 @app.command()
 def audit():
     """Rzetelny mini-audyt marketingowy witryn WWW leadów z gromadzeniem dowodów (evidence)."""
-    console.print("[bold yellow]▶ Uruchamianie mini-audytu marketingowego stron WWW...[/bold yellow]")
+    console.print(
+        "[bold yellow]▶ Uruchamianie mini-audytu marketingowego stron WWW...[/bold yellow]"
+    )
     from leadmachine.audit.web_auditor import WebAuditor
 
     auditor = WebAuditor()
@@ -416,7 +450,9 @@ def audit():
 
         session.commit()
         console.print(table)
-        console.print(f"[bold green]✓ Zakończono audyt marketingowy dla {audited_count} witryn.[/bold green]")
+        console.print(
+            f"[bold green]✓ Zakończono audyt marketingowy dla {audited_count} witryn.[/bold green]"
+        )
 
 
 @app.command()
@@ -485,7 +521,9 @@ def qualify(
         saved_excel = export_leads_to_excel(leads, output_excel)
 
         console.print(table)
-        console.print(f"[bold green]✓ Zakończono kwalifikację: Zakwalifikowane: {q_stats['qualified']}, Odrzucone: {q_stats['disqualified']}[/bold green]")
+        console.print(
+            f"[bold green]✓ Zakończono kwalifikację: Zakwalifikowane: {q_stats['qualified']}, Odrzucone: {q_stats['disqualified']}[/bold green]"
+        )
         console.print(f"[bold green]✓ Zaktualizowano arkusz Excel: {saved_excel}[/bold green]")
 
 
@@ -494,7 +532,9 @@ def ui(
     port: int = typer.Option(8501, "--port", "-p", help="Port for Streamlit dashboard"),
 ):
     """Uruchamia lokalny interfejs Streamlit do zarządzania leadami i stanami."""
-    console.print(f"[bold yellow]▶ Uruchamianie panelu Lead Machine na porcie {port}...[/bold yellow]")
+    console.print(
+        f"[bold yellow]▶ Uruchamianie panelu Lead Machine na porcie {port}...[/bold yellow]"
+    )
     import subprocess
     import sys
 

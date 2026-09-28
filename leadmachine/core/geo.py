@@ -21,27 +21,25 @@ KNOWN_CITIES_COORDS: Dict[str, Tuple[float, float]] = {
     "sroda slaska": (51.1645, 16.5936),
     "polkowice": (51.5034, 16.0694),
     "strzegom": (50.9592, 16.3494),
-    "bolesławiec": (51.2639, 15.5667), # ~42 km - outside
+    "bolesławiec": (51.2639, 15.5667),  # ~42 km - outside
     "boleslawiec": (51.2639, 15.5667),
-    "głogów": (51.6635, 16.0845),     # ~51 km - outside
+    "głogów": (51.6635, 16.0845),  # ~51 km - outside
     "glogow": (51.6635, 16.0845),
-    "wrocław": (51.1079, 17.0385),     # ~65 km - HARD REJECT
+    "wrocław": (51.1079, 17.0385),  # ~65 km - HARD REJECT
     "wroclaw": (51.1079, 17.0385),
 }
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate distance between two coordinates in kilometers using Haversine formula."""
-    r = 6371.0 # Earth's radius in kilometers
+    r = 6371.0  # Earth's radius in kilometers
 
     d_lat = math.radians(lat2 - lat1)
     d_lon = math.radians(lon2 - lon1)
 
     a = (
         math.sin(d_lat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(d_lon / 2) ** 2
+        + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(d_lon / 2) ** 2
     )
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return round(r * c, 2)

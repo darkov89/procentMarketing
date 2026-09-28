@@ -107,7 +107,11 @@ class ScraperAdapter:
             return None
 
         city = lower_map.get("city")
-        address = lower_map.get("address") or lower_map.get("street") or lower_map.get("formatted_address")
+        address = (
+            lower_map.get("address")
+            or lower_map.get("street")
+            or lower_map.get("formatted_address")
+        )
 
         phone = (
             lower_map.get("phone")
@@ -133,9 +137,7 @@ class ScraperAdapter:
         )
 
         google_rating = clean_float(
-            lower_map.get("google_rating")
-            or lower_map.get("totalscore")
-            or lower_map.get("rating")
+            lower_map.get("google_rating") or lower_map.get("totalscore") or lower_map.get("rating")
         )
 
         reviews_count = clean_int(
@@ -146,7 +148,9 @@ class ScraperAdapter:
 
         # Coordinates
         lat = clean_float(lower_map.get("lat") or lower_map.get("latitude"))
-        lon = clean_float(lower_map.get("lng") or lower_map.get("lon") or lower_map.get("longitude"))
+        lon = clean_float(
+            lower_map.get("lng") or lower_map.get("lon") or lower_map.get("longitude")
+        )
 
         # Apify nested location object check
         location_obj = d.get("location")

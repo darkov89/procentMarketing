@@ -12,15 +12,29 @@ logger = logging.getLogger(__name__)
 
 
 class ScoreBreakdown(BaseModel):
-    industry_match: int = Field(ge=0, le=30, description="Dopasowanie do branż priorytetowych Procent Marketing")
+    industry_match: int = Field(
+        ge=0, le=30, description="Dopasowanie do branż priorytetowych Procent Marketing"
+    )
     industry_reason: str = Field(description="Uzasadnienie dopasowania branży")
-    automation_need: int = Field(ge=0, le=25, description="Potrzeba nowej strony WWW lub automatyzacji procesów")
-    automation_need_reason: str = Field(description="Uzasadnienie potrzeby technologicznej z audytu")
-    payment_ability: int = Field(ge=0, le=20, description="Prawdopodobna zdolność płatnicza (opinie, wielkość, status)")
+    automation_need: int = Field(
+        ge=0, le=25, description="Potrzeba nowej strony WWW lub automatyzacji procesów"
+    )
+    automation_need_reason: str = Field(
+        description="Uzasadnienie potrzeby technologicznej z audytu"
+    )
+    payment_ability: int = Field(
+        ge=0, le=20, description="Prawdopodobna zdolność płatnicza (opinie, wielkość, status)"
+    )
     payment_ability_reason: str = Field(description="Uzasadnienie potencjału budżetowego")
-    reachability: int = Field(ge=0, le=15, description="Łatwość dotarcia do decydenta (znany właściciel, bezpośredni kontakt)")
+    reachability: int = Field(
+        ge=0,
+        le=15,
+        description="Łatwość dotarcia do decydenta (znany właściciel, bezpośredni kontakt)",
+    )
     reachability_reason: str = Field(description="Uzasadnienie osiągalności decydenta")
-    other_signals: int = Field(ge=0, le=10, description="Inne sygnały (reklamy, aktywność social media)")
+    other_signals: int = Field(
+        ge=0, le=10, description="Inne sygnały (reklamy, aktywność social media)"
+    )
     other_signals_reason: str = Field(description="Uzasadnienie dodatkowych sygnałów")
     summary: str = Field(description="Krótkie syntetyczne podsumowanie kwalifikacji")
 
@@ -112,7 +126,9 @@ class LeadQualifier:
             try:
                 return self._score_with_gemini(lead, audit, gemini_key)
             except Exception as e:
-                logger.warning(f"Gemini API scoring failed ({e}), falling back to deterministic scoring.")
+                logger.warning(
+                    f"Gemini API scoring failed ({e}), falling back to deterministic scoring."
+                )
 
         return self._score_deterministic(lead, audit)
 
@@ -157,7 +173,9 @@ class LeadQualifier:
             need_factors.append("brak własnej nowoczesnej strony WWW")
 
         need_score = min(25, need_score)
-        need_reason = "Zidentyfikowane braki: " + (", ".join(need_factors) if need_factors else "podstawowa optymalizacja")
+        need_reason = "Zidentyfikowane braki: " + (
+            ", ".join(need_factors) if need_factors else "podstawowa optymalizacja"
+        )
 
         # 3. Payment Ability (0–20)
         pay_score = 8
@@ -174,7 +192,9 @@ class LeadQualifier:
             pay_factors.append("inwestuje w płatne reklamy Meta")
 
         pay_score = min(20, pay_score)
-        pay_reason = "Sygnały budżetowe: " + (", ".join(pay_factors) if pay_factors else "standardowa mikro/mała firma")
+        pay_reason = "Sygnały budżetowe: " + (
+            ", ".join(pay_factors) if pay_factors else "standardowa mikro/mała firma"
+        )
 
         # 4. Reachability (0–15)
         reach_score = 5
@@ -206,7 +226,9 @@ class LeadQualifier:
             other_factors.append(f"wysoka ocena klientów ({audit.google_rating:.1f}★)")
         if audit and audit.social_links:
             other_score += 3
-            other_factors.append(f"obecność w mediach społecznościowych ({len(audit.social_links)} profili)")
+            other_factors.append(
+                f"obecność w mediach społecznościowych ({len(audit.social_links)} profili)"
+            )
 
         other_score = min(10, other_score)
         other_reason = ", ".join(other_factors) if other_factors else "brak dodatkowych sygnałów"
@@ -227,7 +249,9 @@ class LeadQualifier:
             summary=summary,
         )
 
-    def _score_with_gemini(self, lead: Lead, audit: Optional[Audit], api_key: str) -> ScoreBreakdown:
+    def _score_with_gemini(
+        self, lead: Lead, audit: Optional[Audit], api_key: str
+    ) -> ScoreBreakdown:
         """Invokes Gemini model with structured output schema enforcement."""
         from google import genai
         from google.genai import types
@@ -246,14 +270,14 @@ DANE FIRMY:
 - Pewność właściciela: {lead.owner_confidence}
 
 DANE AUDYTU MARKETINGOWEGO:
-- CMS: {audit.cms_detected if audit else 'Brak audytu'}
-- Responsywność: {audit.is_responsive if audit else 'Nie'}
-- Rok w stopce: {audit.copyright_year if audit else 'Nieznany'}
+- CMS: {audit.cms_detected if audit else "Brak audytu"}
+- Responsywność: {audit.is_responsive if audit else "Nie"}
+- Rok w stopce: {audit.copyright_year if audit else "Nieznany"}
 - Posiada GA4: {audit.has_ga4 if audit else False}
 - Posiada Meta Pixel: {audit.has_meta_pixel if audit else False}
 - Posiada rezerwację online: {audit.has_online_booking if audit else False}
 - Posiada formularz: {audit.has_contact_form if audit else False}
-- Ocena Google: {audit.google_rating if audit else 'Brak'} ({audit.google_reviews_count if audit else 0} opinii)
+- Ocena Google: {audit.google_rating if audit else "Brak"} ({audit.google_reviews_count if audit else 0} opinii)
 
 KRYTERIA SCORINGU (wypełnij wyłącznie podwyniki):
 1. industry_match (0-30): czy pasuje do gabinetów, kancelarii, biur rachunkowych, OZE/budowlanki, szkół, B2B?

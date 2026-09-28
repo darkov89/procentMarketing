@@ -22,7 +22,7 @@ class RegistryResult:
     pkd_main: Optional[str] = None
     owner_name: Optional[str] = None
     owner_role: Optional[str] = None
-    owner_confidence: str = "none" # high, medium, low, none
+    owner_confidence: str = "none"  # high, medium, low, none
     source: str = "registry"
     raw_response: Optional[Dict[str, Any]] = None
 
@@ -44,7 +44,10 @@ class RegistryClient:
         clean_nip = normalize_nip(nip)
 
         # 1. Spółki handlowe (KRS)
-        if krs or (company_name and any(term in company_name.lower() for term in ["sp. z o.o.", "spółka", "s.a."])):
+        if krs or (
+            company_name
+            and any(term in company_name.lower() for term in ["sp. z o.o.", "spółka", "s.a."])
+        ):
             krs_res = self._lookup_krs(krs=krs, nip=clean_nip)
             if krs_res:
                 return krs_res
@@ -66,7 +69,9 @@ class RegistryClient:
             source="none",
         )
 
-    def _lookup_krs(self, krs: Optional[str] = None, nip: Optional[str] = None) -> Optional[RegistryResult]:
+    def _lookup_krs(
+        self, krs: Optional[str] = None, nip: Optional[str] = None
+    ) -> Optional[RegistryResult]:
         """Queries the official public Polish Ministry of Justice KRS API."""
         if not krs and not nip:
             return None
@@ -75,7 +80,9 @@ class RegistryClient:
         clean_krs = krs.zfill(10) if krs else None
 
         if clean_krs:
-            url = f"https://api-krs.ms.gov.pl/api/krs/OdpisAktualny/{clean_krs}?rejestr=P&format=json"
+            url = (
+                f"https://api-krs.ms.gov.pl/api/krs/OdpisAktualny/{clean_krs}?rejestr=P&format=json"
+            )
             try:
                 with httpx.Client(timeout=self.timeout) as client:
                     resp = client.get(url)
@@ -178,7 +185,20 @@ class RegistryClient:
             last_candidate = parts[-1]
             if first_candidate.istitle() and last_candidate.istitle():
                 # Common Polish first name / surname patterns
-                surname_endings = ("ski", "ska", "cki", "cka", "ak", "ek", "ik", "yk", "uk", "ec", "a", "k")
+                surname_endings = (
+                    "ski",
+                    "ska",
+                    "cki",
+                    "cka",
+                    "ak",
+                    "ek",
+                    "ik",
+                    "yk",
+                    "uk",
+                    "ec",
+                    "a",
+                    "k",
+                )
                 if any(last_candidate.lower().endswith(end) for end in surname_endings):
                     return RegistryResult(
                         is_active=True,

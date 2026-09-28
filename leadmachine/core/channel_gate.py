@@ -9,11 +9,13 @@ from leadmachine.db.models import Consent
 
 class ConsentRequiredException(PermissionError):
     """Raised when an outreach channel (e.g. SMS, WhatsApp) lacks explicit consent."""
+
     pass
 
 
 class ChannelBlockedException(PermissionError):
     """Raised when a channel is prohibited or improperly configured."""
+
     pass
 
 
@@ -51,7 +53,9 @@ class ChannelGate:
             Consent.granted.is_(True),
         )
         if contact_id:
-            query = query.filter((Consent.contact_id == contact_id) | (Consent.contact_id.is_(None)))
+            query = query.filter(
+                (Consent.contact_id == contact_id) | (Consent.contact_id.is_(None))
+            )
 
         consent_record = query.first()
 

@@ -50,7 +50,7 @@ class Lead(Base):
     score = Column(Integer, default=0, nullable=False)
     score_breakdown = Column(JSON, nullable=True)
     rejection_reason = Column(String(255), nullable=True)
-    owner_confidence = Column(String(50), nullable=True) # high, medium, low, none
+    owner_confidence = Column(String(50), nullable=True)  # high, medium, low, none
     source_name = Column(String(100), default="scraper", nullable=False)
 
     created_at = Column(DateTime, default=utcnow, nullable=False)
@@ -58,8 +58,12 @@ class Lead(Base):
 
     # Relationships
     contacts = relationship("Contact", back_populates="lead", cascade="all, delete-orphan")
-    audit = relationship("Audit", back_populates="lead", uselist=False, cascade="all, delete-orphan")
-    offer = relationship("Offer", back_populates="lead", uselist=False, cascade="all, delete-orphan")
+    audit = relationship(
+        "Audit", back_populates="lead", uselist=False, cascade="all, delete-orphan"
+    )
+    offer = relationship(
+        "Offer", back_populates="lead", uselist=False, cascade="all, delete-orphan"
+    )
     messages = relationship("Message", back_populates="lead", cascade="all, delete-orphan")
     consents = relationship("Consent", back_populates="lead", cascade="all, delete-orphan")
     events = relationship("Event", back_populates="lead", cascade="all, delete-orphan")
@@ -69,7 +73,9 @@ class Contact(Base):
     __tablename__ = "contacts"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
+    lead_id = Column(
+        Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     first_name = Column(String(100), nullable=True)
     last_name = Column(String(100), nullable=True)
     role = Column(String(100), nullable=True)
@@ -88,7 +94,9 @@ class Audit(Base):
     __tablename__ = "audits"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE"), unique=True, nullable=False)
+    lead_id = Column(
+        Integer, ForeignKey("leads.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
     ssl_valid = Column(Boolean, nullable=True)
     is_responsive = Column(Boolean, nullable=True)
     pagespeed_mobile_score = Column(Integer, nullable=True)
@@ -116,7 +124,9 @@ class Offer(Base):
     __tablename__ = "offers"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE"), unique=True, nullable=False)
+    lead_id = Column(
+        Integer, ForeignKey("leads.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
     slug = Column(String(100), unique=True, nullable=False, index=True)
     title = Column(String(255), nullable=False)
     hero_observation = Column(Text, nullable=False)
@@ -126,7 +136,9 @@ class Offer(Base):
     process_steps = Column(JSON, nullable=True)
     booking_url = Column(String(512), nullable=False)
     netlify_deploy_id = Column(String(100), nullable=True)
-    status = Column(String(50), default="draft", nullable=False) # draft, approved, published, expired
+    status = Column(
+        String(50), default="draft", nullable=False
+    )  # draft, approved, published, expired
 
     expires_at = Column(DateTime, nullable=True)
     published_at = Column(DateTime, nullable=True)
@@ -139,11 +151,15 @@ class Message(Base):
     __tablename__ = "messages"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
+    lead_id = Column(
+        Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     contact_id = Column(Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
-    direction = Column(String(20), nullable=False) # outbound, inbound
-    channel = Column(String(20), nullable=False) # email, sms, whatsapp
-    status = Column(String(50), default="draft", nullable=False) # draft, approved, queued, sent, delivered, bounced, failed
+    direction = Column(String(20), nullable=False)  # outbound, inbound
+    channel = Column(String(20), nullable=False)  # email, sms, whatsapp
+    status = Column(
+        String(50), default="draft", nullable=False
+    )  # draft, approved, queued, sent, delivered, bounced, failed
     idempotency_key = Column(String(64), unique=True, nullable=True, index=True)
     message_id = Column(String(255), nullable=True, index=True)
     in_reply_to = Column(String(255), nullable=True, index=True)
@@ -179,7 +195,7 @@ class Consent(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     lead_id = Column(Integer, ForeignKey("leads.id", ondelete="CASCADE"), nullable=True, index=True)
     contact_id = Column(Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
-    channel = Column(String(20), nullable=False) # email, sms, whatsapp
+    channel = Column(String(20), nullable=False)  # email, sms, whatsapp
     granted = Column(Boolean, default=False, nullable=False)
     source = Column(String(100), nullable=False)
     evidence_text = Column(Text, nullable=False)

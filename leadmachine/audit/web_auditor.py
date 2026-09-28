@@ -117,7 +117,9 @@ class WebAuditor:
             res.evidence["cms"] = "No standard CMS fingerprint detected"
 
         # 3. Copyright year / last update
-        year_matches = re.findall(r"(?:©|copyright|\(c\))\s*(?:20\d\d\s*[-–—]\s*)?(20\d\d)", html, re.I)
+        year_matches = re.findall(
+            r"(?:©|copyright|\(c\))\s*(?:20\d\d\s*[-–—]\s*)?(20\d\d)", html, re.I
+        )
         if year_matches:
             try:
                 latest_year = max(int(y) for y in year_matches)
@@ -146,7 +148,9 @@ class WebAuditor:
         if "fbq(" in html or "connect.facebook.net" in html_lower:
             res.has_meta_pixel = True
             res.meta_ads_active = True
-            res.evidence["has_meta_pixel"] = {"snippet": "fbq('init') / connect.facebook.net detected"}
+            res.evidence["has_meta_pixel"] = {
+                "snippet": "fbq('init') / connect.facebook.net detected"
+            }
 
         # 5. Conversion Elements: Contact Form, Online Booking, Live Chat
         forms = soup.find_all("form")
@@ -162,7 +166,15 @@ class WebAuditor:
                 break
 
         # Online booking tools
-        booking_keywords = ["booksy", "calendly", "cal.com", "znanylekarz", "bookero", "rezerwacja online", "umów wizytę"]
+        booking_keywords = [
+            "booksy",
+            "calendly",
+            "cal.com",
+            "znanylekarz",
+            "bookero",
+            "rezerwacja online",
+            "umów wizytę",
+        ]
         for kw in booking_keywords:
             if kw in html_lower:
                 res.has_online_booking = True
@@ -170,7 +182,15 @@ class WebAuditor:
                 break
 
         # Live chat widgets
-        chat_keywords = ["tawk.to", "livechatinc", "smartsupp", "crisp.chat", "tidio", "facebook-jssdk", "intercom"]
+        chat_keywords = [
+            "tawk.to",
+            "livechatinc",
+            "smartsupp",
+            "crisp.chat",
+            "tidio",
+            "facebook-jssdk",
+            "intercom",
+        ]
         for kw in chat_keywords:
             if kw in html_lower:
                 res.has_live_chat = True

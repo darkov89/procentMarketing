@@ -73,8 +73,8 @@ def test_priority_lead_qualification_and_scoring():
     audit = Audit(
         ssl_valid=True,
         is_responsive=True,
-        copyright_year=2021, # outdated website!
-        has_online_booking=False, # needs automation!
+        copyright_year=2021,  # outdated website!
+        has_online_booking=False,  # needs automation!
         has_contact_form=True,
         has_ga4=False,
         has_meta_pixel=False,
@@ -87,6 +87,6 @@ def test_priority_lead_qualification_and_scoring():
     assert res.is_qualified is True
     assert res.total_score >= 60
     assert res.breakdown is not None
-    assert res.breakdown.industry_match == 30 # Medical is priority!
-    assert res.breakdown.automation_need >= 15 # Missing booking and GA4!
-    assert res.breakdown.payment_ability >= 12 # Sp. z o.o. + 85 reviews!
+    assert res.breakdown.industry_match == 30  # Medical is priority!
+    assert res.breakdown.automation_need >= 15  # Missing booking and GA4!
+    assert res.breakdown.payment_ability >= 12  # Sp. z o.o. + 85 reviews!

@@ -5,6 +5,7 @@ from typing import Dict, Set
 
 class InvalidStateTransitionError(ValueError):
     """Raised when an illegal lead state transition is attempted."""
+
     pass
 
 

@@ -17,34 +17,69 @@ EXCEL_COLUMNS = [
     ("Główny kontakt (właściciel)", lambda lead: _get_primary_contact(lead), 25),
     ("Telefon", lambda lead: lead.phone_normalized or "", 18),
     ("Mail firmy", lambda lead: lead.email_primary or "", 26),
-
     # 2. Dane identyfikacyjne i lokalizacja
     ("NIP", lambda lead: lead.nip or "", 14),
     ("Adres", lambda lead: lead.address or "", 28),
     ("Miasto", lambda lead: lead.city or "", 16),
-    ("Odległość Legnica (km)", lambda lead: f"{lead.distance_km:.1f}" if lead.distance_km is not None else "", 14),
+    (
+        "Odległość Legnica (km)",
+        lambda lead: f"{lead.distance_km:.1f}" if lead.distance_km is not None else "",
+        14,
+    ),
     ("Branża", lambda lead: lead.industry or "", 22),
     ("WWW", lambda lead: lead.website or "", 28),
     ("Pewność właściciela", lambda lead: lead.owner_confidence or "brak", 16),
     ("Score", lambda lead: lead.score if lead.score else 0, 10),
     ("Uzasadnienie score", lambda lead: _get_score_reason(lead), 30),
-
     # 3. Audyt marketingowy
     ("SSL", lambda lead: _bool_pl(lead.audit.ssl_valid) if lead.audit else "", 8),
     ("Mobilność", lambda lead: _bool_pl(lead.audit.is_responsive) if lead.audit else "", 10),
-    ("PageSpeed Mobile", lambda lead: lead.audit.pagespeed_mobile_score if lead.audit and lead.audit.pagespeed_mobile_score is not None else "", 12),
-    ("CMS", lambda lead: lead.audit.cms_detected if lead.audit and lead.audit.cms_detected else "", 14),
-    ("Rok aktualizacji", lambda lead: lead.audit.copyright_year if lead.audit and lead.audit.copyright_year else "", 12),
+    (
+        "PageSpeed Mobile",
+        lambda lead: (
+            lead.audit.pagespeed_mobile_score
+            if lead.audit and lead.audit.pagespeed_mobile_score is not None
+            else ""
+        ),
+        12,
+    ),
+    (
+        "CMS",
+        lambda lead: lead.audit.cms_detected if lead.audit and lead.audit.cms_detected else "",
+        14,
+    ),
+    (
+        "Rok aktualizacji",
+        lambda lead: lead.audit.copyright_year if lead.audit and lead.audit.copyright_year else "",
+        12,
+    ),
     ("GA4", lambda lead: _bool_pl(lead.audit.has_ga4) if lead.audit else "", 8),
     ("GTM", lambda lead: _bool_pl(lead.audit.has_gtm) if lead.audit else "", 8),
     ("Meta Pixel", lambda lead: _bool_pl(lead.audit.has_meta_pixel) if lead.audit else "", 10),
     ("Formularz", lambda lead: _bool_pl(lead.audit.has_contact_form) if lead.audit else "", 10),
-    ("Rezerwacja online", lambda lead: _bool_pl(lead.audit.has_online_booking) if lead.audit else "", 14),
+    (
+        "Rezerwacja online",
+        lambda lead: _bool_pl(lead.audit.has_online_booking) if lead.audit else "",
+        14,
+    ),
     ("Czat", lambda lead: _bool_pl(lead.audit.has_live_chat) if lead.audit else "", 8),
-    ("Ocena Google", lambda lead: f"{lead.audit.google_rating:.1f}" if lead.audit and lead.audit.google_rating else "", 12),
-    ("Liczba opinii", lambda lead: lead.audit.google_reviews_count if lead.audit and lead.audit.google_reviews_count else "", 12),
+    (
+        "Ocena Google",
+        lambda lead: (
+            f"{lead.audit.google_rating:.1f}" if lead.audit and lead.audit.google_rating else ""
+        ),
+        12,
+    ),
+    (
+        "Liczba opinii",
+        lambda lead: (
+            lead.audit.google_reviews_count
+            if lead.audit and lead.audit.google_reviews_count
+            else ""
+        ),
+        12,
+    ),
     ("Reklamy Meta", lambda lead: _bool_pl(lead.audit.meta_ads_active) if lead.audit else "", 10),
-
     # 4. Proces i komunikacja
     ("Link do oferty", lambda lead: lead.offer.booking_url if lead.offer else "", 30),
     ("Mail wysłany (data)", lambda lead: _get_message_date(lead, "email"), 18),
@@ -53,7 +88,11 @@ EXCEL_COLUMNS = [
     ("Follow-up (data)", lambda lead: _get_followup_date(lead), 18),
     ("Odpowiedź (kategoria)", lambda lead: _get_reply_info(lead), 20),
     ("Status leada", lambda lead: lead.status or "new", 18),
-    ("Data utworzenia", lambda lead: lead.created_at.strftime("%Y-%m-%d %H:%M") if lead.created_at else "", 18),
+    (
+        "Data utworzenia",
+        lambda lead: lead.created_at.strftime("%Y-%m-%d %H:%M") if lead.created_at else "",
+        18,
+    ),
     ("Źródło danych", lambda lead: lead.source_name or "scraper", 14),
     ("Uwagi / Powód odrzucenia", lambda lead: lead.rejection_reason or "", 30),
 ]
@@ -111,27 +150,36 @@ def _get_reply_info(lead: Lead) -> str:
 
 
 STATUS_COLORS = {
-    "new": "FFF2CC",             # light yellow
-    "qualified": "D9EAD3",       # light green
-    "disqualified": "F4CCCC",    # light red
-    "audited": "CFE2F3",         # light blue
-    "offer_draft": "EAD1DC",     # light purple
+    "new": "FFF2CC",  # light yellow
+    "qualified": "D9EAD3",  # light green
+    "disqualified": "F4CCCC",  # light red
+    "audited": "CFE2F3",  # light blue
+    "offer_draft": "EAD1DC",  # light purple
     "offer_approved": "B6D7A8",  # soft green
-    "offer_published": "A2C4C9", # soft teal
+    "offer_published": "A2C4C9",  # soft teal
     "outreach_queued": "FFF2CC",
     "sent": "D9EAD3",
     "followup_sent": "D9EAD3",
-    "replied_interested": "93C47D", # bright green
-    "replied_question": "A4C2F4",   # sky blue
-    "replied_negative": "EA9999",   # coral red
-    "unsubscribed": "E06666",       # strong red
-    "bounced": "D5A6BD",            # magenta
-    "meeting_booked": "6AA84F",     # strong emerald
+    "replied_interested": "93C47D",  # bright green
+    "replied_question": "A4C2F4",  # sky blue
+    "replied_negative": "EA9999",  # coral red
+    "unsubscribed": "E06666",  # strong red
+    "bounced": "D5A6BD",  # magenta
+    "meeting_booked": "6AA84F",  # strong emerald
 }
 
 
 def export_leads_to_excel(leads: List[Lead], output_path: Path) -> Path:
     """Exports list of Lead entities to a styled Excel file with atomic safe-write fallback."""
+    # Strict rule: Wrocław is completely excluded from reports
+    leads = [
+        lead
+        for lead in leads
+        if not (lead.city and any(w in lead.city.lower() for w in ["wrocław", "wroclaw"]))
+        and not (lead.address and any(w in lead.address.lower() for w in ["wrocław", "wroclaw"]))
+        and not (lead.rejection_reason and "wrocław" in lead.rejection_reason.lower())
+    ]
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Leady B2B"
@@ -182,7 +230,9 @@ def export_leads_to_excel(leads: List[Lead], output_path: Path) -> Path:
 
             # Status column coloring
             if EXCEL_COLUMNS[col_idx - 1][0] == "Status leada":
-                cell.fill = PatternFill(start_color=row_status_color, end_color=row_status_color, fill_type="solid")
+                cell.fill = PatternFill(
+                    start_color=row_status_color, end_color=row_status_color, fill_type="solid"
+                )
                 cell.font = Font(name="Calibri", size=10, bold=True)
 
             # Hyperlinks for WWW and Offer

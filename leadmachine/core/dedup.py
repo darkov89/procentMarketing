@@ -48,7 +48,7 @@ def normalize_domain(website: Optional[str]) -> Optional[str]:
     try:
         parsed = urlparse(raw)
         domain = parsed.netloc or parsed.path
-        domain = domain.split(":")[0] # remove port
+        domain = domain.split(":")[0]  # remove port
         if domain.startswith("www."):
             domain = domain[4:]
         # Exclude generic platforms from matching (facebook, booksy, instagram, etc.)
@@ -130,7 +130,13 @@ def is_duplicate(
                 cand_norm = normalize_company_name(cand.company_name)
                 if cand_norm == norm_name:
                     # check address snippet
-                    if cand.address and (cand.address[:10].lower() in address.lower() or address[:10].lower() in cand.address.lower()):
-                        return True, f"Duplicate Name+Address match: '{company_name}' (Lead #{cand.id})"
+                    if cand.address and (
+                        cand.address[:10].lower() in address.lower()
+                        or address[:10].lower() in cand.address.lower()
+                    ):
+                        return (
+                            True,
+                            f"Duplicate Name+Address match: '{company_name}' (Lead #{cand.id})",
+                        )
 
     return False, None

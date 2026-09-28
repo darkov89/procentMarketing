@@ -19,6 +19,15 @@ blacklisted_keywords:
   - "fast food"
   - "sklep spożywczy"
   - "monopolowy"
+  - "trener personalny"
+  - "trenerzy personalni"
+  - "trening personalny"
+  - "fitness"
+  - "siłownia"
+  - "crossfit"
+  - "sztuki walki"
+  - "kickboxing"
+  - "mma"
 
 # Branże priorytetowe i ich wagi scoringowe
 priority_industries:
