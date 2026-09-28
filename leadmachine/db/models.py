@@ -135,6 +135,7 @@ class Offer(Base):
     pricing_range = Column(String(100), nullable=True)
     process_steps = Column(JSON, nullable=True)
     booking_url = Column(String(512), nullable=False)
+    deploy_url = Column(String(512), nullable=True)
     netlify_deploy_id = Column(String(100), nullable=True)
     status = Column(
         String(50), default="draft", nullable=False

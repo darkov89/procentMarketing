@@ -13,11 +13,11 @@ class InvalidStateTransitionError(ValueError):
 ALLOWED_TRANSITIONS: Dict[str, Set[str]] = {
     "new": {"qualified", "disqualified", "needs_review"},
     "needs_review": {"qualified", "disqualified"},
-    "qualified": {"audited", "offer_draft", "disqualified"},
-    "audited": {"offer_draft", "disqualified"},
-    "offer_draft": {"offer_approved", "disqualified"},
-    "offer_approved": {"offer_published", "disqualified"},
-    "offer_published": {"outreach_queued", "disqualified"},
+    "qualified": {"audited", "offer_draft", "offer_approved", "offer_published", "disqualified"},
+    "audited": {"offer_draft", "offer_approved", "offer_published", "disqualified"},
+    "offer_draft": {"offer_approved", "offer_published", "disqualified"},
+    "offer_approved": {"offer_published", "outreach_queued", "sent", "disqualified"},
+    "offer_published": {"outreach_queued", "sent", "disqualified"},
     "outreach_queued": {"sent", "disqualified"},
     "sent": {
         "followup_sent",

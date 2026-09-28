@@ -555,5 +555,39 @@ def ui(
     subprocess.run(cmd)
 
 
+@app.command()
+def pipeline():
+    """Uruchom pełny autonomiczny cykl Lead Machine (enrich → audit → qualify → offer → email)."""
+    console.print("[bold yellow]▶ Uruchamianie pełnego autonomicznego pipeline'u Lead Machine...[/bold yellow]")
+    from leadmachine.pipeline.orchestrator import PipelineOrchestrator
+
+    init_db()
+    orchestrator = PipelineOrchestrator()
+
+    with get_db() as session:
+        report = orchestrator.run_full_cycle(session)
+
+    # Print rich report table
+    table = Table(title="Raport Autonomicznego Pipeline'u", border_style="yellow")
+    table.add_column("Etap", style="bold white")
+    table.add_column("Wynik", style="bold cyan")
+
+    table.add_row("Wzbogacone dane (CEIDG/KRS)", str(report.enriched_count))
+    table.add_row("Zaudytowane strony WWW", str(report.audited_count))
+    table.add_row("Auto-zakwalifikowane", f"[green]{report.auto_qualified_count}[/green]")
+    table.add_row("Do weryfikacji człowieka", f"[yellow]{report.needs_review_count}[/yellow]")
+    table.add_row("Auto-odrzucone", f"[red]{report.auto_disqualified_count}[/red]")
+    table.add_row("Oferty wygenerowane", str(report.offers_generated_count))
+    table.add_row("Oferty opublikowane (Netlify)", str(report.offers_deployed_count))
+    table.add_row("E-maile wysłane", f"[green]{report.emails_sent_count}[/green]")
+    table.add_row("E-maile nieudane", f"[red]{report.emails_failed_count}[/red]")
+
+    console.print(table)
+
+    if report.errors:
+        console.print("[bold red]Błędy w pipeline:[/bold red]")
+        for err in report.errors:
+            console.print(f"  ❌ {err}")
+
 if __name__ == "__main__":
     app()
