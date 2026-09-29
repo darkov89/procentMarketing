@@ -83,7 +83,8 @@ export default function LeadMachineDashboard() {
   const [pipelineReport, setPipelineReport] = useState<any>(null);
 
   // Scraper Generator state
-  const [scraperKeyword, setScraperKeyword] = useState("Stomatologia");
+  const [scraperCompanyScale, setScraperCompanyScale] = useState<"mikro" | "male" | "msp">("mikro");
+  const [scraperKeyword, setScraperKeyword] = useState("");
   const [scraperCity, setScraperCity] = useState("Legnica");
   const [scraperRadius, setScraperRadius] = useState(30);
   const [scraperLoading, setScraperLoading] = useState(false);
@@ -432,11 +433,12 @@ export default function LeadMachineDashboard() {
     }
   };
 
-  // Run Scraper
+  // Run Scraper with scale definition
   const handleRunScraper = async () => {
     setScraperLoading(true);
     setScraperResult(null);
-    showToast(`Skanowanie dla branży '${scraperKeyword}' w rejonie ${scraperCity}...`, "info");
+    const scaleLabel = scraperCompanyScale === "mikro" ? "Mikroprzedsiębiorstwa (CEIDG)" : scraperCompanyScale === "male" ? "Małe Przedsiębiorstwa (KRS)" : "MŚP";
+    showToast(`Wyszukiwanie firm (${scaleLabel}) w rejonie ${scraperCity}...`, "info");
     try {
       const res = await fetch("/api/scraper", {
         method: "POST",
@@ -445,12 +447,13 @@ export default function LeadMachineDashboard() {
           keyword: scraperKeyword,
           city: scraperCity,
           radiusKm: scraperRadius,
+          companyScale: scraperCompanyScale,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setScraperResult(data);
-        showToast(`Dodano ${data.added} nowych firm! Odrzucono Wrocław: ${data.rejectedWroclaw}`);
+        showToast(`Dodano ${data.added} nowych firm (${scaleLabel})! Odrzucono Wrocław: ${data.rejectedWroclaw}`);
         fetchLeads();
       } else {
         showToast(data.error || "Błąd scrapera", "error");
@@ -459,6 +462,54 @@ export default function LeadMachineDashboard() {
       showToast("Błąd scrapera", "error");
     } finally {
       setScraperLoading(false);
+    }
+  };
+
+  // Run Autonomous End-to-End Scale Cycle (Scrape -> Audit/Scrape Email -> Grounded AI Offer -> Send)
+  const handleRunAutonomousScaleCycle = async () => {
+    setScraperLoading(true);
+    const scaleLabel = scraperCompanyScale === "mikro" ? "Mikroprzedsiębiorstwa (CEIDG)" : scraperCompanyScale === "male" ? "Małe Przedsiębiorstwa (KRS)" : "MŚP";
+    showToast(`[Krok 1/2] Wyszukiwanie firm (${scaleLabel}) i weryfikacja Google Places / CEIDG...`, "info");
+    try {
+      const resScraper = await fetch("/api/scraper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyword: scraperKeyword,
+          city: scraperCity,
+          radiusKm: scraperRadius,
+          companyScale: scraperCompanyScale,
+        }),
+      });
+      const dataScraper = await resScraper.json();
+      if (!dataScraper.success) {
+        showToast(dataScraper.error || "Błąd pobierania firm", "error");
+        setScraperLoading(false);
+        return;
+      }
+      setScraperResult(dataScraper);
+      setScraperLoading(false);
+
+      // Step 2: Trigger Pipeline
+      setPipelineRunning(true);
+      showToast(`[Krok 2/2] Czytanie działalności ze stron WWW, deep-scraping e-maili, tworzenie dedykowanych ofert AI i wysyłka...`, "info");
+      const resPipeline = await fetch("/api/pipeline", { method: "POST" });
+      const dataPipeline = await resPipeline.json();
+      if (dataPipeline.success) {
+        setPipelineReport(dataPipeline.report);
+        showToast(
+          `Cykl ukończony! Zaudytowano WWW: ${dataPipeline.report.auditedCount}, Oferty AI: ${dataPipeline.report.offersGeneratedCount}, E-maile: ${dataPipeline.report.emailsSentCount}`,
+          "success"
+        );
+        fetchLeads();
+      } else {
+        showToast(dataPipeline.error || "Błąd wykonania pipeline'u", "error");
+      }
+    } catch (err: any) {
+      showToast("Błąd wykonania cyklu: " + (err.message || String(err)), "error");
+    } finally {
+      setScraperLoading(false);
+      setPipelineRunning(false);
     }
   };
 
@@ -997,7 +1048,14 @@ export default function LeadMachineDashboard() {
                                 />
                               ) : (
                                 <div>
-                                  <span className="hover:text-[#FFE600] transition-colors">{lead.companyName}</span>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="hover:text-[#FFE600] transition-colors">{lead.companyName}</span>
+                                    {lead.scoreBreakdown?.companyScale && (
+                                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-950/80 text-blue-300 border border-blue-800 font-bold uppercase">
+                                        {lead.scoreBreakdown.companyScale === "mikro" ? "MIKRO" : lead.scoreBreakdown.companyScale === "male" ? "MAŁA" : "MŚP"}
+                                      </span>
+                                    )}
+                                  </div>
                                   {lead.website && (
                                     <a
                                       href={lead.website.startsWith("http") ? lead.website : `https://${lead.website}`}
@@ -1008,6 +1066,11 @@ export default function LeadMachineDashboard() {
                                     >
                                       <Globe size={11} /> {lead.website.replace(/^https?:\/\//, "")}
                                     </a>
+                                  )}
+                                  {(lead.audit?.rawEvidence?.businessActivity || lead.scoreBreakdown?.businessActivity) && (
+                                    <div className="text-[11px] text-[#94A3B8] mt-1 line-clamp-1 italic max-w-sm">
+                                      🎯 {lead.audit?.rawEvidence?.businessActivity || lead.scoreBreakdown?.businessActivity}
+                                    </div>
                                   )}
                                 </div>
                               )}
@@ -1238,39 +1301,100 @@ export default function LeadMachineDashboard() {
         {/* TAB 2: CONFIGURABLE LEAD GENERATOR & SCRAPER */}
         {activeTab === "generator" && (
           <div className="max-w-5xl mx-auto space-y-6">
-            {/* Quick Presets Grid */}
+            {/* SCALE DEFINITION / TARGET ENTERPRISE SEGMENT */}
             <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
                 <div>
                   <h3 className="text-lg font-bold text-[#FFE600] flex items-center gap-2">
-                    <span>⚡ Szybkie Presety Branżowe (Legnica & Region 30 km)</span>
+                    <Building size={20} />
+                    <span>Segment Przedsiębiorstw do Pozyskania (Mikro / Małe / MŚP)</span>
                   </h3>
                   <p className="text-xs text-[#94A3B8] mt-0.5">
-                    Kliknij wybrany profil biznesowy, aby natychmiast załadować i zweryfikować firmy:
+                    Wybierz docelową skalę firm. System weryfikuje CEIDG / KRS i Google Places, czyta ze stron WWW czym firma się zajmuje, i tworzy hiper-personalizowaną ofertę.
                   </p>
                 </div>
+                <button
+                  onClick={handleRunAutonomousScaleCycle}
+                  disabled={scraperLoading || pipelineRunning}
+                  className="bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-50 whitespace-nowrap self-start md:self-auto"
+                >
+                  <Zap size={15} />
+                  {scraperLoading || pipelineRunning ? "Przetwarzanie cyklu..." : "🚀 Pełny Cykl Autonomiczny (1-Click)"}
+                </button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
-                {PRESETS.map((preset, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleApplyPreset(preset)}
-                    disabled={scraperLoading}
-                    className="p-4 bg-[#0A0E17] hover:bg-[#1E293B] border border-[#28354D] hover:border-[#FFE600]/60 rounded-xl text-left transition-all group disabled:opacity-50"
-                  >
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="text-2xl">{preset.icon}</span>
-                      <span className="text-[11px] font-mono bg-[#1E293B] px-2 py-0.5 rounded text-[#FFE600] font-bold">
-                        {preset.city} +{preset.radius}km
-                      </span>
-                    </div>
-                    <h4 className="font-extrabold text-sm text-white group-hover:text-[#FFE600] transition-colors">
-                      {preset.title}
-                    </h4>
-                    <p className="text-xs text-[#94A3B8] mt-1 line-clamp-2">{preset.desc}</p>
-                  </button>
-                ))}
+                {/* Option 1: Mikro */}
+                <div
+                  onClick={() => setScraperCompanyScale("mikro")}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    scraperCompanyScale === "mikro"
+                      ? "bg-[#1E293B] border-[#FFE600] shadow-md shadow-yellow-500/10"
+                      : "bg-[#0A0E17] border-[#28354D] hover:border-[#38BDF8]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-2xl">🏢</span>
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${scraperCompanyScale === "mikro" ? "bg-[#FFE600] text-black" : "bg-[#1E293B] text-[#94A3B8]"}`}>
+                      CEIDG / JDG
+                    </span>
+                  </div>
+                  <h4 className="font-extrabold text-sm text-white">Mikroprzedsiębiorstwa</h4>
+                  <p className="text-xs text-[#94A3B8] mt-1">
+                    Firmy do 9 osób, jednoosobowe działalności (CEIDG), &lt;80 opinii Google Places.
+                  </p>
+                  <div className="mt-3 text-[11px] text-[#38BDF8] flex items-center gap-1 font-semibold">
+                    <CheckCircle2 size={12} /> Auto-audyt WWW + oferta dopasowana do usług
+                  </div>
+                </div>
+
+                {/* Option 2: Małe */}
+                <div
+                  onClick={() => setScraperCompanyScale("male")}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    scraperCompanyScale === "male"
+                      ? "bg-[#1E293B] border-[#FFE600] shadow-md shadow-yellow-500/10"
+                      : "bg-[#0A0E17] border-[#28354D] hover:border-[#38BDF8]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-2xl">🏭</span>
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${scraperCompanyScale === "male" ? "bg-[#FFE600] text-black" : "bg-[#1E293B] text-[#94A3B8]"}`}>
+                      KRS / Sp. z o.o.
+                    </span>
+                  </div>
+                  <h4 className="font-extrabold text-sm text-white">Małe Przedsiębiorstwa</h4>
+                  <p className="text-xs text-[#94A3B8] mt-1">
+                    Firmy 10–49 osób, zarejestrowane w KRS (Sp. z o.o., Sp. j.), 80–250 opinii.
+                  </p>
+                  <div className="mt-3 text-[11px] text-[#38BDF8] flex items-center gap-1 font-semibold">
+                    <CheckCircle2 size={12} /> Rozwiązania B2B, automatyzacja procesów
+                  </div>
+                </div>
+
+                {/* Option 3: Wszystkie MŚP */}
+                <div
+                  onClick={() => setScraperCompanyScale("msp")}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${
+                    scraperCompanyScale === "msp"
+                      ? "bg-[#1E293B] border-[#FFE600] shadow-md shadow-yellow-500/10"
+                      : "bg-[#0A0E17] border-[#28354D] hover:border-[#38BDF8]"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-2xl">🌐</span>
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${scraperCompanyScale === "msp" ? "bg-[#FFE600] text-black" : "bg-[#1E293B] text-[#94A3B8]"}`}>
+                      CAŁE MŚP
+                    </span>
+                  </div>
+                  <h4 className="font-extrabold text-sm text-white">Wszystkie MŚP (Mikro + Małe)</h4>
+                  <p className="text-xs text-[#94A3B8] mt-1">
+                    Pełen przekrój lokalnego rynku przedsiębiorstw w promieniu 30 km od Legnicy.
+                  </p>
+                  <div className="mt-3 text-[11px] text-[#38BDF8] flex items-center gap-1 font-semibold">
+                    <CheckCircle2 size={12} /> Baza CEIDG + KRS + Google Places API
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1281,23 +1405,38 @@ export default function LeadMachineDashboard() {
                   <Search size={22} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold">Własne Wyszukiwanie & Filtr Geograficzny</h2>
+                  <h2 className="text-xl font-bold">Własne Kryteria Poszukiwań & Filtr Geograficzny</h2>
                   <p className="text-sm text-[#94A3B8]">
-                    Wyszukaj dowolną branżę w promieniu od Legnicy. Wyniki z Wrocławia są twardo blokowane.
+                    Wyszukaj firmy o wybranej skali. Branża jest opcjonalna — zostaw puste, aby pobrać wszystkie przedsiębiorstwa.
                   </p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
-                    Branża docelowa / Słowo kluczowe
+                    Wielkość Przedsiębiorstwa
+                  </label>
+                  <select
+                    value={scraperCompanyScale}
+                    onChange={(e) => setScraperCompanyScale(e.target.value as any)}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  >
+                    <option value="mikro">Mikro (CEIDG / JDG)</option>
+                    <option value="male">Małe (KRS / Sp. z o.o.)</option>
+                    <option value="msp">Całe MŚP (Mikro + Małe)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                    Branża (opcjonalnie)
                   </label>
                   <input
                     type="text"
                     value={scraperKeyword}
                     onChange={(e) => setScraperKeyword(e.target.value)}
-                    placeholder="np. Stomatologia, Kancelaria, OZE"
+                    placeholder="Wszystkie branże lokalne"
                     className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   />
                 </div>
@@ -1351,15 +1490,54 @@ export default function LeadMachineDashboard() {
                 <span className="bg-[#E11D48] text-white px-2 py-0.5 rounded font-black text-[10px]">ZERO TOLERANCE</span>
               </div>
 
-              <div className="mt-6 flex justify-end">
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                <span className="text-xs text-[#94A3B8]">
+                  Automatycznie: pobiera profil z Google Places & CEIDG/KRS, audytuje WWW i wyciąga profil usług.
+                </span>
                 <button
                   onClick={handleRunScraper}
                   disabled={scraperLoading}
                   className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-6 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50"
                 >
                   <Play size={16} />
-                  {scraperLoading ? "Skanowanie w toku..." : "Skanuj & Pobierz Firmy"}
+                  {scraperLoading ? "Skanowanie w toku..." : `Skanuj & Pobierz (${scraperCompanyScale === "mikro" ? "Mikro" : scraperCompanyScale === "male" ? "Małe" : "MŚP"})`}
                 </button>
+              </div>
+            </div>
+
+            {/* Quick Presets Grid (Optional Specific Niches) */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    <span>⚡ Opcjonalne Szybkie Filtry Branżowe (Jeśli chcesz zawęzić do niszy)</span>
+                  </h3>
+                  <p className="text-xs text-[#94A3B8] mt-0.5">
+                    Możesz też szybko przefiltrować konkretne profile branżowe w regionie Zagłębia Miedziowego:
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                {PRESETS.map((preset, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleApplyPreset(preset)}
+                    disabled={scraperLoading}
+                    className="p-3.5 bg-[#0A0E17] hover:bg-[#1E293B] border border-[#28354D] hover:border-[#FFE600]/60 rounded-xl text-left transition-all group disabled:opacity-50"
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-xl">{preset.icon}</span>
+                      <span className="text-[10px] font-mono bg-[#1E293B] px-2 py-0.5 rounded text-[#FFE600] font-bold">
+                        {preset.city} +{preset.radius}km
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-xs text-white group-hover:text-[#FFE600] transition-colors">
+                      {preset.title}
+                    </h4>
+                    <p className="text-[11px] text-[#94A3B8] mt-0.5 line-clamp-1">{preset.desc}</p>
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -1869,6 +2047,41 @@ export default function LeadMachineDashboard() {
                       {selectedLead.nip || "—"} / {selectedLead.krs || "—"}
                     </div>
                   </div>
+                </div>
+
+                {/* Profile Działalności (Co robi firma ze strony WWW & CEIDG/KRS) */}
+                <div className="bg-[#141C2E] p-4 rounded-xl border border-[#28354D] space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#FFE600] flex items-center gap-1.5 uppercase tracking-wider">
+                      <Sparkles size={14} /> Profil Działalności (Co robi firma)
+                    </span>
+                    {selectedLead.scoreBreakdown?.companyScale && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-950 text-blue-300 border border-blue-800 font-bold uppercase">
+                        {selectedLead.scoreBreakdown.companyScale === "mikro"
+                          ? "Mikro (CEIDG / JDG)"
+                          : selectedLead.scoreBreakdown.companyScale === "male"
+                          ? "Małe (KRS / Sp. z o.o.)"
+                          : "MŚP"}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-sm text-white font-medium bg-[#0A0E17] p-3 rounded-lg border border-[#1E293B] leading-relaxed">
+                    {selectedLead.audit?.rawEvidence?.businessActivity ||
+                      selectedLead.scoreBreakdown?.businessActivity ||
+                      "Brak szczegółowego profilu działalności. Kliknij 'Skanuj WWW', aby zbadać usługi i ofertę firmy z witryny."}
+                  </div>
+                  {selectedLead.audit?.rawEvidence?.pageTitle && (
+                    <div className="text-xs text-[#94A3B8]">
+                      <span className="font-semibold text-[#CBD5E1]">Tytuł strony:</span>{" "}
+                      {selectedLead.audit.rawEvidence.pageTitle}
+                    </div>
+                  )}
+                  {selectedLead.scoreBreakdown?.legalForm && (
+                    <div className="text-xs text-[#94A3B8]">
+                      <span className="font-semibold text-[#CBD5E1]">Rejestr / Forma prawna:</span>{" "}
+                      {selectedLead.scoreBreakdown.legalForm}
+                    </div>
+                  )}
                 </div>
 
                 {/* Action buttons */}

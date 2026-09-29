@@ -34,6 +34,8 @@ export async function generateOfferContent(
     industry?: string | null;
     city?: string | null;
     website?: string | null;
+    pkdMain?: string | null;
+    scoreBreakdown?: any;
   },
   audit?: {
     sslValid?: boolean | null;
@@ -43,46 +45,75 @@ export async function generateOfferContent(
     hasOnlineBooking?: boolean | null;
     hasContactForm?: boolean | null;
     metaAdsActive?: boolean | null;
+    rawEvidence?: any;
   } | null
 ): Promise<OfferContent> {
   const apiKey = process.env.GEMINI_API_KEY;
+
+  // Extract what the company actually does from web audit & registry
+  const raw = (audit?.rawEvidence as Record<string, any>) || {};
+  const pageTitle = raw.pageTitle || "";
+  const metaDescription = raw.metaDescription || "";
+  const headings = Array.isArray(raw.headings) ? raw.headings.slice(0, 6).join(", ") : "";
+  const businessActivity =
+    raw.businessActivity ||
+    metaDescription ||
+    (headings ? `Specjalizacja: ${headings}` : "") ||
+    lead.industry ||
+    "Usługi lokalne B2B / B2C";
+
+  const companyScale =
+    lead.scoreBreakdown?.companyScale ||
+    (lead.companyName.toLowerCase().includes("sp. z o.o.") ? "Małe przedsiębiorstwo (Sp. z o.o.)" : "Mikroprzedsiębiorstwo (CEIDG / JDG)");
 
   if (apiKey) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Jesteś głównym strategiem agencji marketingowej Procent Marketing (AM PROCENT Sp. z o.o., Legnica).
-Przygotuj spersonalizowaną, elitarną ofertę B2B dla firmy:
+Przygotuj spersonalizowaną, elitarną ofertę automatyzacji marketingu dla firmy:
 - Nazwa: ${lead.companyName}
-- Branża: ${lead.industry || "Usługi profesjonalne"}
-- Miasto: ${lead.city || "Legnica"}
+- Wielkość / Segment: ${companyScale}
+- Miasto i region: ${lead.city || "Legnica"} (rejon Dolnego Śląska)
 - Strona WWW: ${lead.website || "brak"}
 
-TWARDE FAKTY Z AUDYTU (OPRZYJ SIĘ WYŁĄCZNIE NA NICH - ZAKAZ ZMYŚLANIA!):
+CO REALNIE ROBI TA FIRMA (DANE Z AUDYTU WWW I REJESTRU - OPRZYJ OFERTĘ NA TYM!):
+- Tytuł strony: ${pageTitle || "brak"}
+- Zakres działalności ze strony: ${businessActivity}
+- Wymienione usługi/produkty: ${headings || "usługi ogólne"}
+- Kod PKD działalności: ${lead.pkdMain || "brak"}
+
+TWARDE FAKTY Z AUDYTU TECHNOLOGICZNEGO:
 - Certyfikat SSL: ${audit?.sslValid ? "Aktywny" : "Brak"}
 - Responsywność mobile: ${audit?.isResponsive ? "Tak" : "Brak/Problematyczna"}
 - System CMS: ${audit?.cmsDetected || "Niezidentyfikowany/Autorski"}
-- Google Analytics 4: ${audit?.hasGa4 ? "Zainstalowane" : "BRAK"}
-- Rezerwacja wizyt online: ${audit?.hasOnlineBooking ? "Obecna" : "BRAK (ogromny punkt straty klientów!)"}
+- Google Analytics 4: ${audit?.hasGa4 ? "Zainstalowane" : "BRAK (brak mierzenia zapytań!)"}
+- Rezerwacja wizyt/usług online: ${audit?.hasOnlineBooking ? "Obecna" : "BRAK (strata klientów po godzinach!)"}
 - Formularz kontaktowy: ${audit?.hasContactForm ? "Obecny" : "BRAK"}
 - Reklamy Meta Ads: ${audit?.metaAdsActive ? "Aktywny piksel" : "Brak piksela"}
 
+KLUCZOWE WYMAGANIA:
+1. OFERTA MUSI BYĆ DEDYKOWANA DO TEGO, CZYM TA FIRMA SIĘ ZAJMUJE!
+   - Nazwy proponowanych modułów muszą bezpośrednio nawiązywać do jej branży i oferty (np. dla hydraulika -> 'Kalkulator Zapytań Wod-Kan', dla serwisu -> 'Kalendarz Rezerwacji Stanowiska', dla doradcy -> 'System Kwalifikacji Klienta').
+   - W heroHeadline zawrzyj nazwę firmy oraz jej kluczową specjalizację i miasto (${lead.city || "Legnica"}).
+2. ZAKAZ ZMYŚLANIA: Opieraj się wyłącznie na faktach z audytu i powyższym opisie działalności.
+
 Zwróć odpowiedź w czystym JSON zgodnym ze schematem:
 {
-  "heroHeadline": "Mocny, spersonalizowany nagłówek dla tej firmy",
-  "heroObservation": "2-3 konkretne zdania o stanie ich obecności w sieci na bazie powyższych faktów",
+  "heroHeadline": "Mocny nagłówek odnoszący się do konkretnej działalności tej firmy i miasta",
+  "heroObservation": "2-3 konkretne zdania o tym co robi firma i jakie ma luki technologiczne blokujące klientów",
   "observations": [
     {"finding": "Co zauważyliśmy", "impact": "Wpływ na biznes i utratę klientów", "evidenceKey": "klucz_faktu"}
   ],
   "proposedModules": [
-    {"name": "Nazwa modułu", "description": "Krótki opis wdrożenia", "iconEmoji": "⚡"}
+    {"name": "Nazwa modułu dopasowana do jej branży", "description": "Krótki opis wdrożenia i korzyści", "iconEmoji": "⚡"}
   ],
   "pricingRange": "od 2 500 do 4 500 zł / miesięcznie",
   "processSteps": [
-    {"stepNumber": 1, "title": "Warsztat zerowy", "description": "Analiza procesów"},
-    {"stepNumber": 2, "title": "Wdrożenie", "description": "Konfiguracja narzędzi"},
-    {"stepNumber": 3, "title": "Optymalizacja", "description": "Maksymalizacja leadów"}
+    {"stepNumber": 1, "title": "Warsztat zerowy", "description": "Analiza procesów pozyskiwania klientów"},
+    {"stepNumber": 2, "title": "Wdrożenie modułów", "description": "Konfiguracja narzędzi i integracja z www"},
+    {"stepNumber": 3, "title": "Skalowanie zapytań", "description": "Bieżąca optymalizacja napływu klientów"}
   ],
-  "ctaText": "Umów 15-minutową konsultację z Dariuszem"
+  "ctaText": "Umów 15-minutową bezpłatną konsultację"
 }`;
 
       const response = await ai.models.generateContent({
@@ -158,8 +189,10 @@ Zwróć odpowiedź w czystym JSON zgodnym ze schematem:
   }
 
   return {
-    heroHeadline: `Skalowanie zapytań i automatyzacja obsługi klienta dla ${lead.companyName}`,
-    heroObservation: `Przeprowadziliśmy wstępny audyt obecności cyfrowej firmy ${lead.companyName} w rejonie ${lead.city || "Legnicy"}. Zidentyfikowaliśmy kluczowe wąskie gardła ograniczające napływ nowych klientów z internetu.`,
+    heroHeadline: businessActivity && businessActivity.length > 5
+      ? `Automatyzacja pozyskiwania klientów i zleceń: ${lead.companyName}`
+      : `Skalowanie zapytań i obsługa klienta dla ${lead.companyName}`,
+    heroObservation: `Zbadaliśmy profil obecności cyfrowej firmy ${lead.companyName} (${businessActivity ? businessActivity.slice(0, 150) : lead.industry || "usługi"}) w rejonie ${lead.city || "Legnicy"}. Zidentyfikowaliśmy kluczowe wąskie gardła technologiczne ograniczające konwersję zapytań z internetu.`,
     observations,
     proposedModules: modules,
     pricingRange: "od 2 800 zł do 4 900 zł / mies.",

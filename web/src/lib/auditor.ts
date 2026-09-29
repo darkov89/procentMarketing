@@ -151,7 +151,53 @@ export async function auditWebsite(targetUrl: string): Promise<AuditResult> {
     textContent.includes("tidio");
   if (hasLiveChat) evidence["live_chat"] = true;
 
-  // 5. Scrape Emails
+  // 5. Scrape Business Profile ("Co robi firma" - title, meta description, headings, services)
+  const pageTitle = $("title").text().trim().replace(/\s+/g, " ");
+  const metaDescription =
+    $('meta[name="description"]').attr("content")?.trim().replace(/\s+/g, " ") ||
+    $('meta[property="og:description"]').attr("content")?.trim().replace(/\s+/g, " ") ||
+    "";
+
+  const headings: string[] = [];
+  $("h1, h2, h3").each((_, el) => {
+    const text = $(el).text().trim().replace(/\s+/g, " ");
+    if (text && text.length > 4 && text.length < 120 && !headings.includes(text)) {
+      headings.push(text);
+    }
+  });
+
+  let sampleParagraphs = "";
+  $("p").each((_, el) => {
+    const p = $(el).text().trim().replace(/\s+/g, " ");
+    if (
+      p.length > 40 &&
+      p.length < 350 &&
+      (p.toLowerCase().includes("oferuj") ||
+        p.toLowerCase().includes("usług") ||
+        p.toLowerCase().includes("zajmujemy") ||
+        p.toLowerCase().includes("specjaliz") ||
+        p.toLowerCase().includes("dostarcz") ||
+        p.toLowerCase().includes("montaż") ||
+        p.toLowerCase().includes("serwis") ||
+        p.toLowerCase().includes("napraw") ||
+        p.toLowerCase().includes("klient") ||
+        p.toLowerCase().includes("doświadcz"))
+    ) {
+      if (!sampleParagraphs) sampleParagraphs = p;
+    }
+  });
+
+  const businessActivity =
+    metaDescription ||
+    sampleParagraphs ||
+    (headings.length > 0 ? `Specjalizacja i oferta: ${headings.slice(0, 4).join(", ")}` : pageTitle);
+
+  evidence["pageTitle"] = pageTitle;
+  evidence["metaDescription"] = metaDescription;
+  evidence["headings"] = headings.slice(0, 8);
+  evidence["businessActivity"] = businessActivity;
+
+  // 6. Scrape Emails (Homepage + Deep Contact subpage lookup)
   const emailsSet = new Set<string>();
   $('a[href^="mailto:"]').each((_, el) => {
     const href = $(el).attr("href") || "";
@@ -168,7 +214,62 @@ export async function auditWebsite(targetUrl: string): Promise<AuditResult> {
     }
   }
 
-  // 6. Social Links
+  // Deep Email Scraping: If no email on homepage, check /kontakt or contact link
+  if (emailsSet.size === 0) {
+    let contactHref = $('a[href*="kontakt"], a[href*="contact"]').first().attr("href");
+    let contactTarget = "";
+    if (contactHref) {
+      if (contactHref.startsWith("http")) {
+        contactTarget = contactHref;
+      } else {
+        try {
+          contactTarget = new URL(contactHref, url).toString();
+        } catch {}
+      }
+    } else {
+      try {
+        contactTarget = new URL("/kontakt", url).toString();
+      } catch {}
+    }
+
+    if (contactTarget) {
+      try {
+        const cController = new AbortController();
+        const cTimeout = setTimeout(() => cController.abort(), 4000);
+        const cRes = await fetch(contactTarget, {
+          signal: cController.signal,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 (ProcentMarketing-Auditor/2.0)",
+          },
+        });
+        clearTimeout(cTimeout);
+        if (cRes.ok) {
+          const cHtml = await cRes.text();
+          const c$ = cheerio.load(cHtml);
+          c$('a[href^="mailto:"]').each((_, el) => {
+            const href = c$(el).attr("href") || "";
+            const email = href.replace(/^mailto:/i, "").split("?")[0].trim().toLowerCase();
+            if (email && email.includes("@")) emailsSet.add(email);
+          });
+          const cMatches = cHtml.match(emailRegex) || [];
+          for (const m of cMatches) {
+            const clean = m.toLowerCase();
+            if (
+              !clean.endsWith(".png") &&
+              !clean.endsWith(".jpg") &&
+              !clean.includes("sentry") &&
+              !clean.includes("wix")
+            ) {
+              emailsSet.add(clean);
+            }
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // 7. Social Links
   const socialLinks: Record<string, string> = {};
   $('a[href]').each((_, el) => {
     const href = $(el).attr("href") || "";
@@ -177,7 +278,7 @@ export async function auditWebsite(targetUrl: string): Promise<AuditResult> {
     if (href.includes("linkedin.com/") && !socialLinks.linkedin) socialLinks.linkedin = href;
   });
 
-  // 7. Copyright Year
+  // 8. Copyright Year
   let copyrightYear: number | null = null;
   const copyMatch = html.match(/©\s*(20[12]\d)/);
   if (copyMatch) {

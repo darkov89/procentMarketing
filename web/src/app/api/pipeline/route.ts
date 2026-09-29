@@ -12,6 +12,7 @@ import slugify from "slugify";
 export async function POST() {
   const report = {
     auditedCount: 0,
+    emailsScrapedCount: 0,
     qualifiedCount: 0,
     needsReviewCount: 0,
     disqualifiedCount: 0,
@@ -26,7 +27,7 @@ export async function POST() {
       with: { audit: true, offer: true, contacts: true, messages: true },
     });
 
-    // 1. AUDIT
+    // 1. AUDIT & SCRAPE ("Co robi firma" + Deep Email Scraping)
     for (const lead of allLeads) {
       if (lead.website && !lead.audit) {
         try {
@@ -41,6 +42,16 @@ export async function POST() {
             .returning();
           lead.audit = createdAudit;
           report.auditedCount++;
+
+          // Auto-save scraped email to lead if missing!
+          if (!lead.emailPrimary && auditData.emailsScraped.length > 0) {
+            await db
+              .update(leads)
+              .set({ emailPrimary: auditData.emailsScraped[0], updatedAt: new Date() })
+              .where(eq(leads.id, lead.id));
+            lead.emailPrimary = auditData.emailsScraped[0];
+            report.emailsScrapedCount++;
+          }
         } catch (e: any) {
           report.errors.push(`Audyt #${lead.id} błąd: ${e.message}`);
         }
@@ -130,6 +141,10 @@ export async function POST() {
           (m) => m.direction === "outbound" && m.channel === "email" && m.status === "sent"
         );
         if (!hasSent) {
+          if (!lead.emailPrimary) {
+            // Cannot dispatch outreach email without an address
+            continue;
+          }
           try {
             const contactName = lead.contacts?.[0]?.firstName || null;
             const draft = composeEmail(lead, lead.offer, contactName);

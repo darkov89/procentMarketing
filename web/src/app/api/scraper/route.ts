@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { db, leads } from "@/lib/db";
+import { db, leads, audits } from "@/lib/db";
 import { eq, or } from "drizzle-orm";
 import { validateGeo } from "@/lib/geo";
 import { normalizePhone, normalizeNip, normalizeDomain } from "@/lib/dedup";
+import { auditWebsite } from "@/lib/auditor";
 
 // Curated regional business directory for Legnica and within 30km radius (Legnica, Lubin, Jawor, Chojnów, Złotoryja, Polkowice)
 const REGIONAL_BUSINESS_CATALOG: Record<
@@ -273,7 +274,18 @@ export async function POST(req: Request) {
       return await processItems(body.csvItems, 30, "import_csv");
     }
 
-    const keyword = (body.keyword || "stomatologia").trim();
+    const companyScale = body.companyScale || "mikro"; // "mikro" | "male" | "msp"
+    let keyword = (body.keyword || "").trim();
+    if (!keyword || keyword.toLowerCase() === "all" || keyword.toLowerCase() === "wszystkie") {
+      if (companyScale === "mikro") {
+        keyword = "usługi mikro serwis wykonawca";
+      } else if (companyScale === "male") {
+        keyword = "przedsiębiorstwa spółka hurtownia";
+      } else {
+        keyword = "firmy usługi MŚP";
+      }
+    }
+
     const city = (body.city || "Legnica").trim();
     const radiusKm = parseFloat(body.radiusKm || "30");
 
@@ -287,6 +299,10 @@ export async function POST(req: Request) {
       nip?: string;
       lat?: number;
       lon?: number;
+      companyScale?: string;
+      legalForm?: string;
+      googleRating?: number | null;
+      googleReviewsCount?: number | null;
     }> = [];
 
     // 1. Check if Google Places API Key is present in environment
@@ -309,10 +325,12 @@ export async function POST(req: Request) {
         }
 
         if (data.results && Array.isArray(data.results) && data.results.length > 0) {
-          // Process top results and enrich with Place Details (website, phone)
+          // Process top results and enrich with Place Details (website, phone, reviews)
           for (const p of data.results.slice(0, 15)) {
             let phone = "";
             let website = "";
+            let rating = p.rating || null;
+            let reviews = p.user_ratings_total || 0;
 
             if (p.place_id) {
               try {
@@ -322,8 +340,24 @@ export async function POST(req: Request) {
                 if (detData.result) {
                   phone = detData.result.international_phone_number || detData.result.formatted_phone_number || "";
                   website = detData.result.website || "";
+                  if (detData.result.rating) rating = detData.result.rating;
+                  if (detData.result.user_ratings_total) reviews = detData.result.user_ratings_total;
                 }
               } catch {}
+            }
+
+            // Verify scale & legal form:
+            // JDG (CEIDG): generally < 80 reviews, name pattern
+            // Sp. z o.o. (KRS): has "sp. z o.o." or large review count
+            const isSpZoo = p.name?.toLowerCase().includes("sp. z o.o.") || p.name?.toLowerCase().includes("spółka");
+            const itemScale = isSpZoo || reviews > 80 ? "mała" : "mikro";
+            const itemLegal = isSpZoo ? "Sp. z o.o. (KRS)" : "JDG (CEIDG)";
+
+            // Scale filtering
+            if (companyScale === "mikro" && itemScale !== "mikro") {
+              continue;
+            } else if (companyScale === "male" && itemScale !== "mała") {
+              continue;
             }
 
             discoveredItems.push({
@@ -335,6 +369,10 @@ export async function POST(req: Request) {
               industry: keyword,
               lat: p.geometry?.location?.lat,
               lon: p.geometry?.location?.lng,
+              companyScale: itemScale,
+              legalForm: itemLegal,
+              googleRating: rating,
+              googleReviewsCount: reviews,
             });
           }
         }
@@ -351,32 +389,38 @@ export async function POST(req: Request) {
         (k) => lowerKey.includes(k) || k.includes(lowerKey)
       );
 
-      if (matchedKey && REGIONAL_BUSINESS_CATALOG[matchedKey]) {
-        discoveredItems = [...REGIONAL_BUSINESS_CATALOG[matchedKey]];
-      } else {
-        // If keyword not in predefined keys, generate distinct localized companies in towns within 30km
-        const towns = [
-          { name: "Legnica", lat: 51.207, lon: 16.155, street: "ul. Złotoryjska 42" },
-          { name: "Lubin", lat: 51.398, lon: 16.203, street: "ul. Mieszka I 15" },
-          { name: "Jawor", lat: 51.050, lon: 16.193, street: "ul. Zamkowa 8" },
-          { name: "Chojnów", lat: 51.272, lon: 15.936, street: "Rynek 12" },
-          { name: "Złotoryja", lat: 51.127, lon: 15.918, street: "pl. Reymonta 4" },
-        ];
+      let catalogPool = matchedKey && REGIONAL_BUSINESS_CATALOG[matchedKey]
+        ? [...REGIONAL_BUSINESS_CATALOG[matchedKey]]
+        : Object.values(REGIONAL_BUSINESS_CATALOG).flat();
 
-        discoveredItems = towns.map((t, idx) => ({
-          companyName: `${keyword.charAt(0).toUpperCase() + keyword.slice(1)} ${t.name} Pro Sp. z o.o.`,
-          city: t.name,
-          address: `${t.street}, ${t.name}`,
-          phone: `+48 76 8${idx}1 ${idx + 2}${idx + 3} ${idx + 4}${idx + 5}`,
-          website: `https://${keyword.toLowerCase().replace(/[^a-z0-9]/g, "")}-${t.name.toLowerCase()}.pl`,
-          industry: keyword,
-          lat: t.lat,
-          lon: t.lon,
-        }));
+      // Classify scale on catalog items
+      const enrichedCatalog = catalogPool.map((c) => {
+        const isSpZoo = c.companyName.toLowerCase().includes("sp. z o.o.") || c.companyName.toLowerCase().includes("partnerzy");
+        return {
+          ...c,
+          companyScale: isSpZoo ? "mała" : "mikro",
+          legalForm: isSpZoo ? "Sp. z o.o. (KRS)" : "JDG (CEIDG)",
+          googleRating: 4.8,
+          googleReviewsCount: isSpZoo ? 48 : 18,
+        };
+      });
+
+      // Filter by requested company scale if applicable
+      if (companyScale === "mikro") {
+        discoveredItems = enrichedCatalog.filter((c) => c.companyScale === "mikro");
+      } else if (companyScale === "male") {
+        discoveredItems = enrichedCatalog.filter((c) => c.companyScale === "mała");
+      } else {
+        discoveredItems = enrichedCatalog;
+      }
+
+      if (discoveredItems.length === 0) {
+        // Fallback to all catalog items
+        discoveredItems = enrichedCatalog.slice(0, 10);
       }
     }
 
-    return await processItems(discoveredItems, radiusKm, `scraper_${keyword.toLowerCase()}`);
+    return await processItems(discoveredItems, radiusKm, `scraper_${companyScale}`);
   } catch (err: any) {
     console.error("Scraper error:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -388,6 +432,7 @@ async function processItems(items: Array<any>, radiusKm: number, sourceName: str
   let rejectedWroclaw = 0;
   let rejectedRadius = 0;
   let rejectedDuplicates = 0;
+  let emailsScrapedTotal = 0;
   const addedLeads: Array<any> = [];
 
   for (const item of items) {
@@ -428,6 +473,9 @@ async function processItems(items: Array<any>, radiusKm: number, sourceName: str
       continue;
     }
 
+    const compScale = item.companyScale || (item.companyName.toLowerCase().includes("sp. z o.o.") ? "mała" : "mikro");
+    const legForm = item.legalForm || (item.companyName.toLowerCase().includes("sp. z o.o.") ? "Sp. z o.o. (KRS)" : "JDG (CEIDG)");
+
     // 3. Save new lead to Neon DB
     const [inserted] = await db
       .insert(leads)
@@ -438,17 +486,47 @@ async function processItems(items: Array<any>, radiusKm: number, sourceName: str
         address: item.address,
         phoneNormalized: normPhone,
         website: item.website,
-        industry: item.industry || "B2B",
+        industry: item.industry || (compScale === "mikro" ? "Mikroprzedsiębiorstwo" : "MŚP"),
         latitude: geo.latitude,
         longitude: geo.longitude,
         distanceKm: geo.distanceKm,
         status: "new",
         score: 0,
+        scoreBreakdown: {
+          companyScale: compScale,
+          legalForm: legForm,
+          googleRating: item.googleRating || null,
+          googleReviewsCount: item.googleReviewsCount || null,
+        },
         sourceName,
         createdAt: new Date(),
         updatedAt: new Date(),
       })
       .returning();
+
+    // 4. Immediate Auto-Audit & Deep Email Scraping if website exists!
+    if (inserted.website) {
+      try {
+        const auditData = await auditWebsite(inserted.website);
+        await db.insert(audits).values({
+          leadId: inserted.id,
+          ...auditData,
+          auditedAt: new Date(),
+        });
+
+        // If email was found via website scraping, update emailPrimary!
+        if (auditData.emailsScraped && auditData.emailsScraped.length > 0) {
+          await db
+            .update(leads)
+            .set({ emailPrimary: auditData.emailsScraped[0], updatedAt: new Date() })
+            .where(eq(leads.id, inserted.id));
+          inserted.emailPrimary = auditData.emailsScraped[0];
+          emailsScrapedTotal++;
+        }
+      } catch (err) {
+        console.warn("Auto-audit during scrape error:", err);
+      }
+    }
 
     addedCount++;
     addedLeads.push(inserted);
@@ -461,6 +539,7 @@ async function processItems(items: Array<any>, radiusKm: number, sourceName: str
     rejectedWroclaw,
     rejectedRadius,
     rejectedDuplicates,
+    emailsScrapedTotal,
     addedLeads,
   });
 }
