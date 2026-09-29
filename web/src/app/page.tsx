@@ -26,6 +26,10 @@ import {
   ChevronRight,
   X,
   Play,
+  Inbox,
+  Server,
+  Key,
+  Upload,
 } from "lucide-react";
 
 interface LeadItem {
@@ -79,6 +83,38 @@ export default function LeadMachineDashboard() {
   const [scraperRadius, setScraperRadius] = useState(30);
   const [scraperLoading, setScraperLoading] = useState(false);
   const [scraperResult, setScraperResult] = useState<any>(null);
+
+  // Inbox Poller state
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxResult, setInboxResult] = useState<any>(null);
+
+  // Mail & API Settings state
+  const [mailSettings, setMailSettings] = useState({
+    smtpHost: "",
+    smtpPort: 587,
+    smtpUser: "",
+    smtpPass: "",
+    smtpFromEmail: "",
+    smtpFromName: "",
+    smtpSecure: false,
+    imapHost: "",
+    imapPort: 993,
+    imapUser: "",
+    imapPass: "",
+    imapTls: true,
+    googleApiKey: "",
+    geminiApiKey: "",
+    netlifyToken: "",
+    hasSmtpPass: false,
+    hasImapPass: false,
+    hasGoogleApiKey: false,
+    hasGeminiApiKey: false,
+    hasNetlifyToken: false,
+  });
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [smtpTesting, setSmtpTesting] = useState(false);
+  const [imapTesting, setImapTesting] = useState(false);
+  const [csvUploading, setCsvUploading] = useState(false);
 
   // Notification Toast
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
@@ -316,6 +352,261 @@ export default function LeadMachineDashboard() {
     }
   };
 
+  // Presets definition
+  const PRESETS = [
+    {
+      icon: "🦷",
+      title: "Stomatologia & Medycyna",
+      keyword: "Stomatologia",
+      city: "Legnica",
+      radius: 30,
+      desc: "Gabinety i kliniki stomatologiczne (Legnica, Lubin, Jawor)",
+    },
+    {
+      icon: "📊",
+      title: "Biura Rachunkowe",
+      keyword: "Księgowość",
+      city: "Lubin",
+      radius: 30,
+      desc: "Kancelarie podatkowe i rachunkowe (Legnica, Lubin, Jawor)",
+    },
+    {
+      icon: "⚖️",
+      title: "Kancelarie Prawne",
+      keyword: "Prawo",
+      city: "Legnica",
+      radius: 30,
+      desc: "Adwokaci i radcowie prawni w Zagłębiu Miedziowym",
+    },
+    {
+      icon: "☀️",
+      title: "Fotowoltaika & HVAC",
+      keyword: "Fotowoltaika",
+      city: "Chojnów",
+      radius: 30,
+      desc: "Instalatorzy OZE, pomp ciepła i klimatyzacji",
+    },
+    {
+      icon: "🏭",
+      title: "Automatyka B2B & Przemysł",
+      keyword: "Automatyka B2B",
+      city: "Polkowice",
+      radius: 35,
+      desc: "Serwis maszyn przemysłowych i integracja robotów",
+    },
+    {
+      icon: "🏗️",
+      title: "Budownictwo & Remonty",
+      keyword: "Budownictwo",
+      city: "Złotoryja",
+      radius: 30,
+      desc: "Generalni wykonawcy i firmy budowlano-remontowe",
+    },
+  ];
+
+  // Fetch mail settings
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch("/api/settings/mail");
+      const data = await res.json();
+      if (data.success && data.config) {
+        setMailSettings((prev) => ({ ...prev, ...data.config }));
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (activeTab === "settings") {
+      fetchSettings();
+    }
+  }, [activeTab]);
+
+  // Handle Poll Inbox
+  const handlePollInbox = async () => {
+    setInboxLoading(true);
+    showToast("Odpytywanie serwera IMAP i klasyfikacja odpowiedzi...", "info");
+    try {
+      const res = await fetch("/api/inbox/poll", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setInboxResult(data);
+        showToast(data.message, "success");
+        fetchLeads();
+      } else {
+        showToast(data.message || "Błąd odpytywania skrzynki", "error");
+      }
+    } catch {
+      showToast("Błąd połączenia z serwerem poczty", "error");
+    } finally {
+      setInboxLoading(false);
+    }
+  };
+
+  // Handle Test SMTP
+  const handleTestSmtp = async () => {
+    setSmtpTesting(true);
+    showToast("Testowanie połączenia z serwerem SMTP...", "info");
+    try {
+      const res = await fetch("/api/settings/test-smtp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mailSettings),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, "success");
+      } else {
+        showToast(data.message, "error");
+      }
+    } catch {
+      showToast("Błąd wykonania testu SMTP", "error");
+    } finally {
+      setSmtpTesting(false);
+    }
+  };
+
+  // Handle Test IMAP
+  const handleTestImap = async () => {
+    setImapTesting(true);
+    showToast("Testowanie połączenia z serwerem IMAP...", "info");
+    try {
+      const res = await fetch("/api/settings/test-imap", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mailSettings),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, "success");
+      } else {
+        showToast(data.message, "error");
+      }
+    } catch {
+      showToast("Błąd wykonania testu IMAP", "error");
+    } finally {
+      setImapTesting(false);
+    }
+  };
+
+  // Handle Save Settings
+  const handleSaveSettings = async () => {
+    setSettingsLoading(true);
+    showToast("Zapisywanie konfiguracji...", "info");
+    try {
+      const res = await fetch("/api/settings/mail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(mailSettings),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message, "success");
+        fetchSettings();
+      } else {
+        showToast(data.error || "Błąd zapisu ustawień", "error");
+      }
+    } catch {
+      showToast("Błąd połączenia z serwerem", "error");
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  // Handle Apply Preset
+  const handleApplyPreset = async (preset: (typeof PRESETS)[0]) => {
+    setScraperKeyword(preset.keyword);
+    setScraperCity(preset.city);
+    setScraperRadius(preset.radius);
+    setScraperLoading(true);
+    setScraperResult(null);
+    showToast(`Uruchamianie presetu '${preset.title}' (${preset.city} + ${preset.radius}km)...`, "info");
+    try {
+      const res = await fetch("/api/scraper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyword: preset.keyword,
+          city: preset.city,
+          radiusKm: preset.radius,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setScraperResult(data);
+        showToast(`Preset: Dodano ${data.added} nowych firm! Odrzucono Wrocław: ${data.rejectedWroclaw}`);
+        fetchLeads();
+      } else {
+        showToast(data.error || "Błąd presetu", "error");
+      }
+    } catch {
+      showToast("Błąd scrapera", "error");
+    } finally {
+      setScraperLoading(false);
+    }
+  };
+
+  // Handle CSV file upload
+  const handleCsvFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCsvUploading(true);
+    showToast("Przetwarzanie pliku CSV...", "info");
+    try {
+      const text = await file.text();
+      const lines = text.split("\n").filter((l) => l.trim().length > 0);
+      if (lines.length <= 1) {
+        showToast("Plik CSV jest pusty lub zawiera tylko nagłówek", "error");
+        setCsvUploading(false);
+        return;
+      }
+
+      const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/["']/g, ""));
+      const nameIdx = headers.findIndex((h) => h.includes("name") || h.includes("firma") || h.includes("nazwa"));
+      const cityIdx = headers.findIndex((h) => h.includes("city") || h.includes("miasto"));
+      const phoneIdx = headers.findIndex((h) => h.includes("phone") || h.includes("tel"));
+      const webIdx = headers.findIndex((h) => h.includes("web") || h.includes("url") || h.includes("strona"));
+      const addressIdx = headers.findIndex((h) => h.includes("addr") || h.includes("adres"));
+      const nipIdx = headers.findIndex((h) => h.includes("nip"));
+      const catIdx = headers.findIndex((h) => h.includes("cat") || h.includes("bran"));
+
+      const items: any[] = [];
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(",").map((p) => p.trim().replace(/^["']|["']$/g, ""));
+        if (!parts[nameIdx] && !parts[0]) continue;
+
+        items.push({
+          companyName: parts[nameIdx !== -1 ? nameIdx : 0] || "Firma",
+          city: parts[cityIdx !== -1 ? cityIdx : 1] || "Legnica",
+          phone: parts[phoneIdx !== -1 ? phoneIdx : 2] || "",
+          address: parts[addressIdx !== -1 ? addressIdx : 3] || "",
+          website: parts[webIdx !== -1 ? webIdx : 4] || "",
+          industry: parts[catIdx !== -1 ? catIdx : 5] || "B2B",
+          nip: nipIdx !== -1 ? parts[nipIdx] : undefined,
+        });
+      }
+
+      const res = await fetch("/api/scraper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvItems: items }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setScraperResult(data);
+        showToast(`Zaimportowano z CSV: +${data.added} firm (Odrzucono Wrocław: ${data.rejectedWroclaw})`);
+        fetchLeads();
+      } else {
+        showToast(data.error || "Błąd importu CSV", "error");
+      }
+    } catch (err: any) {
+      showToast("Błąd czytania pliku CSV", "error");
+    } finally {
+      setCsvUploading(false);
+      e.target.value = "";
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#0A0E17] text-[#F8FAFC]">
       {/* Toast Notification */}
@@ -375,6 +666,15 @@ export default function LeadMachineDashboard() {
             >
               <Zap size={16} />
               {pipelineRunning ? "Przetwarzanie..." : "Uruchom Pełny Cykl"}
+            </button>
+            <button
+              onClick={handlePollInbox}
+              disabled={inboxLoading}
+              className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8]/50 text-[#38BDF8] font-bold text-sm px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50"
+              title="Odpytaj serwer IMAP w poszukiwaniu nowych odpowiedzi klientów"
+            >
+              <Inbox size={16} className={inboxLoading ? "animate-pulse" : ""} />
+              <span className="hidden lg:inline">{inboxLoading ? "Sprawdzanie..." : "Sprawdź skrzynkę (IMAP)"}</span>
             </button>
             <a
               href="/api/export"
@@ -799,16 +1099,53 @@ export default function LeadMachineDashboard() {
 
         {/* TAB 2: CONFIGURABLE LEAD GENERATOR & SCRAPER */}
         {activeTab === "generator" && (
-          <div className="max-w-4xl mx-auto space-y-6">
+          <div className="max-w-5xl mx-auto space-y-6">
+            {/* Quick Presets Grid */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-[#FFE600] flex items-center gap-2">
+                    <span>⚡ Szybkie Presety Branżowe (Legnica & Region 30 km)</span>
+                  </h3>
+                  <p className="text-xs text-[#94A3B8] mt-0.5">
+                    Kliknij wybrany profil biznesowy, aby natychmiast załadować i zweryfikować firmy:
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                {PRESETS.map((preset, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleApplyPreset(preset)}
+                    disabled={scraperLoading}
+                    className="p-4 bg-[#0A0E17] hover:bg-[#1E293B] border border-[#28354D] hover:border-[#FFE600]/60 rounded-xl text-left transition-all group disabled:opacity-50"
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-2xl">{preset.icon}</span>
+                      <span className="text-[11px] font-mono bg-[#1E293B] px-2 py-0.5 rounded text-[#FFE600] font-bold">
+                        {preset.city} +{preset.radius}km
+                      </span>
+                    </div>
+                    <h4 className="font-extrabold text-sm text-white group-hover:text-[#FFE600] transition-colors">
+                      {preset.title}
+                    </h4>
+                    <p className="text-xs text-[#94A3B8] mt-1 line-clamp-2">{preset.desc}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Search Form */}
             <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2.5 bg-[#FFE600] text-black rounded-xl font-bold">
                   <Search size={22} />
                 </div>
                 <div>
-                  <h2 className="text-xl font-bold">Autonomiczny Generator Leadów & Scraper</h2>
+                  <h2 className="text-xl font-bold">Własne Wyszukiwanie & Filtr Geograficzny</h2>
                   <p className="text-sm text-[#94A3B8]">
-                    Wyszukaj nowe firmy, zweryfikuj współrzędne GPS i twardo odrzuć Wrocław.
+                    Wyszukaj dowolną branżę w promieniu od Legnicy. Wyniki z Wrocławia są twardo blokowane.
                   </p>
                 </div>
               </div>
@@ -841,6 +1178,7 @@ export default function LeadMachineDashboard() {
                     <option value="Jawor">Jawor</option>
                     <option value="Złotoryja">Złotoryja</option>
                     <option value="Chojnów">Chojnów</option>
+                    <option value="Polkowice">Polkowice</option>
                   </select>
                 </div>
 
@@ -887,9 +1225,27 @@ export default function LeadMachineDashboard() {
               </div>
             </div>
 
+            {/* CSV Import Section */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <Upload size={18} className="text-[#38BDF8]" />
+                  Importuj Bazę z Pliku CSV
+                </h3>
+                <p className="text-xs text-[#94A3B8] mt-1">
+                  Obsługuje pliki z Google Maps, Apify, PanoramaFirm lub CEIDG. Automatyczny filtr geo (Legnica ≤30km) i deduplikacja.
+                </p>
+              </div>
+              <label className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-xs px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-2 transition-all">
+                <Upload size={15} />
+                {csvUploading ? "Przetwarzanie..." : "Wybierz plik .CSV"}
+                <input type="file" accept=".csv" onChange={handleCsvFileUpload} disabled={csvUploading} className="hidden" />
+              </label>
+            </div>
+
             {/* Scraper Results Card */}
             {scraperResult && (
-              <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl">
+              <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl animate-in fade-in duration-200">
                 <h3 className="text-lg font-bold text-[#FFE600] mb-3">Wyniki ostatniego skanowania:</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                   <div className="bg-[#0A0E17] p-3 rounded-lg border border-[#28354D]">
@@ -905,7 +1261,7 @@ export default function LeadMachineDashboard() {
                     <div className="text-xl font-black text-[#FB7185]">{scraperResult.rejectedWroclaw}</div>
                   </div>
                   <div className="bg-[#0A0E17] p-3 rounded-lg border border-[#28354D]">
-                    <span className="text-xs text-[#94A3B8]">Duplikaty</span>
+                    <span className="text-xs text-[#94A3B8]">Duplikaty pominięte</span>
                     <div className="text-xl font-black text-white">{scraperResult.rejectedDuplicates}</div>
                   </div>
                 </div>
@@ -999,36 +1355,274 @@ export default function LeadMachineDashboard() {
 
         {/* TAB 4: SETTINGS */}
         {activeTab === "settings" && (
-          <div className="max-w-3xl mx-auto bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-6">
-            <h2 className="text-xl font-bold flex items-center gap-2 text-[#FFE600]">
-              <SettingsIcon size={22} />
-              Konfiguracja Globalna & Integracje
-            </h2>
+          <div className="max-w-4xl mx-auto space-y-6">
+            {/* System Status Indicators */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-4">
+              <h2 className="text-xl font-bold flex items-center gap-2 text-[#FFE600]">
+                <SettingsIcon size={22} />
+                Status Systemu & Zabezpieczenia
+              </h2>
 
-            <div className="space-y-4">
-              <div className="p-4 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center justify-between">
-                <div>
-                  <h4 className="font-bold text-sm">Tryb Wysyłki (LIVE_MODE)</h4>
-                  <p className="text-xs text-[#94A3B8]">W trybie sandbox maile trafiają wyłącznie na adres testowy.</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-1">
+                <div className="p-3.5 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-[#94A3B8]">Tryb Wysyłki</h4>
+                    <p className="text-sm font-extrabold text-[#34D399] mt-0.5">SANDBOX (BEZPIECZNY)</p>
+                  </div>
+                  <span className="badge badge-approved">AKTYWNY</span>
                 </div>
-                <span className="badge badge-approved">SANDBOX (BEZPIECZNY)</span>
+
+                <div className="p-3.5 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-[#94A3B8]">Kill-Switch (STOP)</h4>
+                    <p className="text-sm font-extrabold text-[#38BDF8] mt-0.5">BEZPIECZNIK CZUWA</p>
+                  </div>
+                  <span className="badge badge-approved">UZBROJONY</span>
+                </div>
+
+                <div className="p-3.5 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center justify-between">
+                  <div>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-[#94A3B8]">Neon Cloud DB</h4>
+                    <p className="text-sm font-extrabold text-[#C084FC] mt-0.5">POSTGRESQL FRANKFURT</p>
+                  </div>
+                  <span className="badge badge-approved">POŁĄCZONO</span>
+                </div>
+              </div>
+            </div>
+
+            {/* SMTP Configuration Form */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-[#28354D] pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-[#FFE600]/10 text-[#FFE600] rounded-lg">
+                    <Server size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">Serwer Poczty Wychodzącej (SMTP)</h3>
+                    <p className="text-xs text-[#94A3B8]">Wysyłka spersonalizowanych propozycji i audytów (Sandbox / Live)</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTestSmtp}
+                  disabled={smtpTesting}
+                  className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#FFE600]/40 text-[#FFE600] font-bold text-xs px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={smtpTesting ? "animate-spin" : ""} />
+                  {smtpTesting ? "Testowanie..." : "Testuj połączenie SMTP"}
+                </button>
               </div>
 
-              <div className="p-4 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center justify-between">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                 <div>
-                  <h4 className="font-bold text-sm">Główny Bezpiecznik (Kill-Switch)</h4>
-                  <p className="text-xs text-[#94A3B8]">Obecność pliku STOP w systemie natychmiastowo paraliżuje wszelką wysyłkę.</p>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Host SMTP</label>
+                  <input
+                    type="text"
+                    value={mailSettings.smtpHost}
+                    onChange={(e) => setMailSettings({ ...mailSettings, smtpHost: e.target.value })}
+                    placeholder="np. smtp.gmail.com lub mail.twojadomena.pl"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
                 </div>
-                <span className="badge badge-approved">BEZPIECZNIK AKTYWNY</span>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Port SMTP</label>
+                  <input
+                    type="number"
+                    value={mailSettings.smtpPort}
+                    onChange={(e) => setMailSettings({ ...mailSettings, smtpPort: parseInt(e.target.value, 10) || 587 })}
+                    placeholder="587 (STARTTLS) lub 465 (SSL)"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Użytkownik / Login</label>
+                  <input
+                    type="text"
+                    value={mailSettings.smtpUser}
+                    onChange={(e) => setMailSettings({ ...mailSettings, smtpUser: e.target.value })}
+                    placeholder="kontakt@twojadomena.pl"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Hasło / Hasło Aplikacji</label>
+                  <input
+                    type="password"
+                    value={mailSettings.smtpPass}
+                    onChange={(e) => setMailSettings({ ...mailSettings, smtpPass: e.target.value })}
+                    placeholder={mailSettings.hasSmtpPass ? "•••••••• (pozostaw puste aby nie zmieniać)" : "Wpisz hasło"}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Adres Nadawcy (From Email)</label>
+                  <input
+                    type="text"
+                    value={mailSettings.smtpFromEmail}
+                    onChange={(e) => setMailSettings({ ...mailSettings, smtpFromEmail: e.target.value })}
+                    placeholder="kontakt@procentmarketing.pl"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Nazwa Nadawcy (From Name)</label>
+                  <input
+                    type="text"
+                    value={mailSettings.smtpFromName}
+                    onChange={(e) => setMailSettings({ ...mailSettings, smtpFromName: e.target.value })}
+                    placeholder="Procent Marketing"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* IMAP Configuration Form */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-4">
+              <div className="flex items-center justify-between border-b border-[#28354D] pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-[#38BDF8]/10 text-[#38BDF8] rounded-lg">
+                    <Inbox size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-extrabold text-white">Serwer Poczty Przychodzącej (IMAP - Monitor)</h3>
+                    <p className="text-xs text-[#94A3B8]">Automatyczne wykrywanie odpowiedzi, pytań i żądań wypisania STOP</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleTestImap}
+                  disabled={imapTesting}
+                  className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8]/40 text-[#38BDF8] font-bold text-xs px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50"
+                >
+                  <RefreshCw size={14} className={imapTesting ? "animate-spin" : ""} />
+                  {imapTesting ? "Testowanie..." : "Testuj połączenie IMAP"}
+                </button>
               </div>
 
-              <div className="p-4 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center justify-between">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                 <div>
-                  <h4 className="font-bold text-sm">Baza Danych Neon PostgreSQL</h4>
-                  <p className="text-xs text-[#94A3B8]">Połączenie serverless HTTP (Frankfurt aws-eu-central-1).</p>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Host IMAP</label>
+                  <input
+                    type="text"
+                    value={mailSettings.imapHost}
+                    onChange={(e) => setMailSettings({ ...mailSettings, imapHost: e.target.value })}
+                    placeholder="np. imap.gmail.com lub mail.twojadomena.pl"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
                 </div>
-                <span className="badge badge-approved">POŁĄCZONO</span>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Port IMAP</label>
+                  <input
+                    type="number"
+                    value={mailSettings.imapPort}
+                    onChange={(e) => setMailSettings({ ...mailSettings, imapPort: parseInt(e.target.value, 10) || 993 })}
+                    placeholder="993 (SSL) lub 143 (STARTTLS)"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Użytkownik IMAP</label>
+                  <input
+                    type="text"
+                    value={mailSettings.imapUser}
+                    onChange={(e) => setMailSettings({ ...mailSettings, imapUser: e.target.value })}
+                    placeholder="kontakt@twojadomena.pl"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">Hasło IMAP</label>
+                  <input
+                    type="password"
+                    value={mailSettings.imapPass}
+                    onChange={(e) => setMailSettings({ ...mailSettings, imapPass: e.target.value })}
+                    placeholder={mailSettings.hasImapPass ? "•••••••• (pozostaw puste aby nie zmieniać)" : "Wpisz hasło IMAP"}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
               </div>
+            </div>
+
+            {/* API Keys Configuration */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-4">
+              <div className="flex items-center gap-2.5 border-b border-[#28354D] pb-3">
+                <div className="p-2 bg-[#A855F7]/10 text-[#C084FC] rounded-lg">
+                  <Key size={18} />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-white">Klucze Usług Zewnętrznych</h3>
+                  <p className="text-xs text-[#94A3B8]">Google Places API, Gemini AI oraz Netlify</p>
+                </div>
+              </div>
+
+              <div className="space-y-3 pt-1">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-[#94A3B8]">GOOGLE_MAPS_API_KEY (Google Places & Details)</label>
+                    <span className="text-[11px] text-[#A5B4FC]">Opcjonalne (odblokowuje dynamiczne pobieranie www i telefonów)</span>
+                  </div>
+                  <input
+                    type="password"
+                    value={mailSettings.googleApiKey}
+                    onChange={(e) => setMailSettings({ ...mailSettings, googleApiKey: e.target.value })}
+                    placeholder={mailSettings.hasGoogleApiKey ? "•••••••• (skonfigurowano)" : "Wklej klucz Google Places API"}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                  <p className="text-[11px] text-[#64748B] mt-1">
+                    Bez klucza Google Places system korzysta z wbudowanego bogatego katalogu lokalnego (Legnica + 30km) oraz importu CSV.
+                  </p>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-[#94A3B8]">GEMINI_API_KEY (Google Gemini AI)</label>
+                    <span className="text-[11px] text-[#A5B4FC]">Wymagane do personalizacji ofert i AI klasyfikacji</span>
+                  </div>
+                  <input
+                    type="password"
+                    value={mailSettings.geminiApiKey}
+                    onChange={(e) => setMailSettings({ ...mailSettings, geminiApiKey: e.target.value })}
+                    placeholder={mailSettings.hasGeminiApiKey ? "•••••••• (skonfigurowano)" : "Wklej klucz Gemini API"}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-[#94A3B8]">NETLIFY_AUTH_TOKEN</label>
+                    <span className="text-[11px] text-[#A5B4FC]">Opcjonalne (do publikacji stron na Netlify)</span>
+                  </div>
+                  <input
+                    type="password"
+                    value={mailSettings.netlifyToken}
+                    onChange={(e) => setMailSettings({ ...mailSettings, netlifyToken: e.target.value })}
+                    placeholder={mailSettings.hasNetlifyToken ? "•••••••• (skonfigurowano)" : "Wklej token Netlify"}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={handleSaveSettings}
+                disabled={settingsLoading}
+                className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-6 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50"
+              >
+                <Save size={16} />
+                {settingsLoading ? "Zapisywanie..." : "Zapisz Wszystkie Ustawienia"}
+              </button>
             </div>
           </div>
         )}

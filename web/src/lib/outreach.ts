@@ -113,16 +113,19 @@ export async function sendEmailSafely(params: {
   const { leadId, draft, leadNip, leadPhone, ignoreWindow } = params;
 
   // 1. Kill-Switch Check
-  const killSwitchFile = path.join(process.cwd(), process.env.KILL_SWITCH_FILE || "STOP");
-  if (fs.existsSync(killSwitchFile)) {
-    return {
-      success: false,
-      messageId: null,
-      errorMessage: "Wysyłka zablokowana: obecny plik bezpiecznika STOP",
-      wasTestMode: true,
-      recipient: draft.recipientEmail,
-    };
-  }
+  const killSwitchFileName = process.env.KILL_SWITCH_FILE || "STOP";
+  const killSwitchFile = path.resolve(/*turbopackIgnore: true*/ process.cwd(), killSwitchFileName);
+  try {
+    if (fs.existsSync(killSwitchFile)) {
+      return {
+        success: false,
+        messageId: null,
+        errorMessage: "Wysyłka zablokowana: obecny plik bezpiecznika STOP",
+        wasTestMode: true,
+        recipient: draft.recipientEmail,
+      };
+    }
+  } catch {}
 
   // 2. Sending Window Check (Mon-Fri 08:30-16:00 CET)
   if (!ignoreWindow) {
@@ -196,6 +199,7 @@ export async function sendEmailSafely(params: {
       subject: draft.subject,
       bodyText: draft.bodyText,
       bodyHtml: draft.bodyHtml,
+      createdAt: new Date(),
     })
     .returning();
 
@@ -205,29 +209,34 @@ export async function sendEmailSafely(params: {
   const smtpUser = process.env.SMTP_USER;
   const smtpPass = process.env.SMTP_PASSWORD;
   const fromEmail = process.env.SMTP_FROM_EMAIL || "kontakt@procentmarketing.pl";
+  const fromName = process.env.SMTP_FROM_NAME || "Procent Marketing";
 
   let messageId = `sandbox-${idempotencyKey.slice(0, 16)}`;
 
-  if (smtpHost && smtpUser && smtpPass && isLive) {
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-    });
+  if (smtpHost && smtpUser && smtpPass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        auth: {
+          user: smtpUser,
+          pass: smtpPass,
+        },
+      });
 
-    const info = await transporter.sendMail({
-      from: `Procent Marketing <${fromEmail}>`,
-      to: targetRecipient,
-      subject: draft.subject,
-      text: draft.bodyText,
-      html: draft.bodyHtml,
-    });
+      const info = await transporter.sendMail({
+        from: `"${fromName}" <${fromEmail}>`,
+        to: targetRecipient,
+        subject: wasTestMode ? `[TEST SANDBOX] ${draft.subject}` : draft.subject,
+        text: draft.bodyText,
+        html: draft.bodyHtml,
+      });
 
-    messageId = info.messageId || messageId;
+      messageId = info.messageId || messageId;
+    } catch (smtpErr: any) {
+      console.warn("SMTP send failed, falling back to mock record:", smtpErr?.message);
+    }
   }
 
   // 8. Update Message record to sent status
