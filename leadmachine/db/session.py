@@ -13,10 +13,13 @@ from leadmachine.db.models import Base
 def get_engine(db_url: str = None):
     settings = get_settings()
     url = db_url or settings.database_url
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+
     connect_args = {}
     if url.startswith("sqlite"):
         connect_args["check_same_thread"] = False
-    return create_engine(url, connect_args=connect_args, echo=False)
+    return create_engine(url, connect_args=connect_args, pool_pre_ping=True, echo=False)
 
 
 def get_session_factory(engine=None):
