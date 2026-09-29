@@ -6,6 +6,7 @@ venv/
 # Environment variables and secrets
 .env
 .env.local
+.neon
 
 # Databases
 *.db

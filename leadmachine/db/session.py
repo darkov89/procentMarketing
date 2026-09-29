@@ -14,7 +14,9 @@ def get_engine(db_url: str = None):
     settings = get_settings()
     url = db_url or settings.database_url
     if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
+        url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif url.startswith("postgresql://") and not url.startswith("postgresql+"):
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
 
     connect_args = {}
     if url.startswith("sqlite"):
