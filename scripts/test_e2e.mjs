@@ -114,6 +114,37 @@ async function runTest() {
   assert(dataOutreach.success === true, "Outreach dispatch completed");
   assert(dataOutreach.result?.wasTestMode === true, "Sandbox safety confirmed: wasTestMode=true");
 
+  // TEST 8B: Strict Anti-Duplicate Prevention (Cannot send initial email twice)
+  console.log(`\n--- TEST 8B: Testing Anti-Duplicate Protection on Lead #${targetLead.id} ---`);
+  const resDup = await fetch(`${BASE_URL}/api/outreach/${targetLead.id}`, { method: "POST" });
+  const dataDup = await resDup.json();
+  console.log("Duplicate check response:", dataDup);
+  assert(resDup.status === 400 && dataDup.success === false, "Duplicate initial email unconditionally blocked");
+  assert(dataDup.alreadySent === true, "alreadySent flag correctly returned");
+
+  // TEST 8C: Sending AI Follow-up (in the same email thread)
+  console.log(`\n--- TEST 8C: Sending AI Follow-up for Lead #${targetLead.id} ---`);
+  const resFollowup = await fetch(`${BASE_URL}/api/outreach/${targetLead.id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isFollowup: true }),
+  });
+  const dataFollowup = await resFollowup.json();
+  console.log("Follow-up response:", dataFollowup);
+  assert(dataFollowup.success === true, "AI Follow-up dispatched successfully in the same thread");
+  assert(dataFollowup.isFollowup === true, "Response confirmed as follow-up");
+
+  // TEST 8D: Blocking Second Follow-up (Maximum 1 follow-up permitted)
+  console.log(`\n--- TEST 8D: Testing Second Follow-up Block on Lead #${targetLead.id} ---`);
+  const resFollowup2 = await fetch(`${BASE_URL}/api/outreach/${targetLead.id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isFollowup: true }),
+  });
+  const dataFollowup2 = await resFollowup2.json();
+  console.log("Second follow-up block response:", dataFollowup2);
+  assert(resFollowup2.status === 400 && dataFollowup2.success === false, "Second follow-up strictly blocked");
+
   // TEST 9: Mail Settings API
   console.log("\n--- TEST 9: Getting Mail and API Settings ---");
   const resSettings = await fetch(`${BASE_URL}/api/settings/mail`);

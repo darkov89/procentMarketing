@@ -30,6 +30,11 @@ import {
   Server,
   Key,
   Upload,
+  Sparkles,
+  Send,
+  Clock,
+  MessageSquare,
+  ArrowRight,
 } from "lucide-react";
 
 interface LeadItem {
@@ -116,12 +121,53 @@ export default function LeadMachineDashboard() {
   const [imapTesting, setImapTesting] = useState(false);
   const [csvUploading, setCsvUploading] = useState(false);
 
+  // Outreach & Follow-up Drawer State
+  const [outreachData, setOutreachData] = useState<{
+    lead?: any;
+    messages?: any[];
+    initialDraft?: any;
+    followupDraft?: any;
+    alreadySent?: boolean;
+    canSendFollowup?: boolean;
+  } | null>(null);
+  const [outreachLoading, setOutreachLoading] = useState(false);
+  const [outreachSubject, setOutreachSubject] = useState("");
+  const [outreachBody, setOutreachBody] = useState("");
+  const [outreachSending, setOutreachSending] = useState(false);
+  const [outreachAiGenerating, setOutreachAiGenerating] = useState(false);
+
   // Notification Toast
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" | "info" } | null>(null);
 
   const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  // Fetch Outreach data (messages, initial draft, AI follow-up draft)
+  const fetchOutreachData = async (leadId: number) => {
+    try {
+      setOutreachLoading(true);
+      const res = await fetch(`/api/outreach/${leadId}`);
+      const data = await res.json();
+      if (data.success) {
+        setOutreachData(data);
+        if (data.canSendFollowup && data.followupDraft) {
+          setOutreachSubject(data.followupDraft.subject || "");
+          setOutreachBody(data.followupDraft.bodyText || "");
+        } else if (!data.alreadySent && data.initialDraft) {
+          setOutreachSubject(data.initialDraft.subject || "");
+          setOutreachBody(data.initialDraft.bodyText || "");
+        } else if (data.messages && data.messages.length > 0) {
+          setOutreachSubject(data.messages[0].subject || "");
+          setOutreachBody(data.messages[0].bodyText || "");
+        }
+      }
+    } catch (err) {
+      console.error("Błąd pobierania danych outreach:", err);
+    } finally {
+      setOutreachLoading(false);
+    }
   };
 
   // Fetch leads
@@ -147,6 +193,13 @@ export default function LeadMachineDashboard() {
   useEffect(() => {
     fetchLeads();
   }, []);
+
+  // When drawer opens or switches to email tab, fetch message history and drafts
+  useEffect(() => {
+    if (selectedLead && drawerTab === "email") {
+      fetchOutreachData(selectedLead.id);
+    }
+  }, [selectedLead?.id, drawerTab]);
 
   // Filtered Leads
   const filteredLeads = useMemo(() => {
@@ -179,10 +232,10 @@ export default function LeadMachineDashboard() {
   // Metric counts
   const metrics = useMemo(() => {
     const total = leads.length;
-    const qualified = leads.filter((l) => ["qualified", "offer_published", "sent"].includes(l.status)).length;
+    const qualified = leads.filter((l) => ["qualified", "offer_published", "sent", "followup_sent"].includes(l.status)).length;
     const needsReview = leads.filter((l) => l.status === "needs_review").length;
     const offersPublished = leads.filter((l) => l.offer).length;
-    const emailsSent = leads.filter((l) => l.messages?.some((m) => m.status === "sent")).length;
+    const emailsSent = leads.filter((l) => l.status === "sent" || l.status === "followup_sent" || l.messages?.some((m) => m.status === "sent")).length;
     const disqualified = leads.filter((l) => l.status === "disqualified").length;
 
     return { total, qualified, needsReview, offersPublished, emailsSent, disqualified };
@@ -275,13 +328,70 @@ export default function LeadMachineDashboard() {
       });
       const data = await res.json();
       if (data.success) {
-        showToast(`Wysłano wiadomość do: ${data.result.recipient}`);
+        showToast(
+          data.isFollowup
+            ? `Wysłano Follow-up do: ${data.result.recipient}`
+            : `Wysłano e-mail do: ${data.result.recipient}`
+        );
         fetchLeads();
+        if (selectedLead?.id === leadId) {
+          fetchOutreachData(leadId);
+        }
       } else {
         showToast(data.result?.errorMessage || data.error || "Błąd wysyłki", "error");
       }
     } catch {
       showToast("Błąd wysyłki", "error");
+    }
+  };
+
+  // Drawer Action: Send Outreach or Follow-up
+  const handleSendOutreachFromDrawer = async (isFollowupMode: boolean) => {
+    if (!selectedLead) return;
+    try {
+      setOutreachSending(true);
+      showToast(isFollowupMode ? "Wysyłka Follow-up AI..." : "Wysyłka e-maila zgodnie z RODO...", "info");
+      const res = await fetch(`/api/outreach/${selectedLead.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          isFollowup: isFollowupMode,
+          subject: outreachSubject,
+          bodyText: outreachBody,
+          ignoreWindow: true,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(
+          isFollowupMode
+            ? `Wysłano Follow-up AI do: ${data.result.recipient}`
+            : `Wysłano e-mail do: ${data.result.recipient}`
+        );
+        await fetchLeads();
+        await fetchOutreachData(selectedLead.id);
+      } else {
+        showToast(data.result?.errorMessage || data.error || "Błąd wysyłki", "error");
+      }
+    } catch {
+      showToast("Błąd wysyłki wiadomości", "error");
+    } finally {
+      setOutreachSending(false);
+    }
+  };
+
+  // Drawer Action: Regenerate Follow-up AI draft
+  const handleRegenerateFollowupAi = async () => {
+    if (!selectedLead) return;
+    try {
+      setOutreachAiGenerating(true);
+      showToast("Generowanie spersonalizowanego Follow-up z Gemini AI...", "info");
+      await fetchOutreachData(selectedLead.id);
+      showToast("Zaktualizowano szkic z modelu Gemini AI!");
+    } catch {
+      showToast("Błąd odświeżania draftu AI", "error");
+    } finally {
+      setOutreachAiGenerating(false);
     }
   };
 
@@ -819,6 +929,7 @@ export default function LeadMachineDashboard() {
                   <option value="needs_review">Do weryfikacji (needs_review)</option>
                   <option value="offer_published">Oferta gotowa (offer_published)</option>
                   <option value="sent">E-mail wysłany (sent)</option>
+                  <option value="followup_sent">Follow-up wysłany (followup_sent)</option>
                   <option value="disqualified">Odrzucone (disqualified)</option>
                 </select>
               </div>
@@ -943,21 +1054,24 @@ export default function LeadMachineDashboard() {
                                   <option value="needs_review">needs_review</option>
                                   <option value="offer_published">offer_published</option>
                                   <option value="sent">sent</option>
+                                  <option value="followup_sent">followup_sent</option>
                                   <option value="disqualified">disqualified</option>
                                 </select>
                               ) : (
                                 <span
-                                  className={`badge ${
+                                  className={`px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider ${
                                     lead.status === "qualified"
-                                      ? "badge-approved"
+                                      ? "bg-emerald-950/80 text-emerald-400 border border-emerald-700/60"
                                       : lead.status === "needs_review"
-                                      ? "badge-review"
+                                      ? "bg-amber-950/80 text-amber-400 border border-amber-700/60"
                                       : lead.status === "disqualified"
-                                      ? "badge-rejected"
+                                      ? "bg-rose-950/80 text-rose-400 border border-rose-700/60"
                                       : lead.status === "offer_published"
-                                      ? "badge-offer"
+                                      ? "bg-sky-950/80 text-sky-400 border border-sky-700/60"
                                       : lead.status === "sent"
-                                      ? "badge-sent"
+                                      ? "bg-purple-950/80 text-purple-400 border border-purple-700/60"
+                                      : lead.status === "followup_sent"
+                                      ? "bg-indigo-950/80 text-indigo-400 border border-indigo-700/60"
                                       : "bg-[#1E293B] text-white border border-[#334155]"
                                   }`}
                                 >
@@ -1024,9 +1138,33 @@ export default function LeadMachineDashboard() {
                             {/* Email Outreach Status */}
                             <td className="p-3.5 text-xs">
                               {lead.status === "sent" ? (
-                                <span className="text-[#C084FC] font-bold flex items-center gap-1">
-                                  <CheckCircle2 size={13} /> Wysłany
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedLead(lead);
+                                    setDrawerTab("email");
+                                  }}
+                                  className="text-[#C084FC] hover:text-[#E9D5FF] font-bold flex items-center gap-1 bg-[#581C87]/40 hover:bg-[#581C87]/70 border border-[#9333EA]/40 px-2.5 py-1 rounded-md transition-all cursor-pointer"
+                                  title="Wysłano e-mail wstępny. Kliknij, aby przygotować Follow-up AI"
+                                >
+                                  <CheckCircle2 size={13} /> Wysłano (Follow-up AI →)
+                                </button>
+                              ) : lead.status === "followup_sent" ? (
+                                <span className="text-[#A5B4FC] font-bold flex items-center gap-1 bg-[#3730A3]/40 border border-[#6366F1]/40 px-2.5 py-1 rounded-md w-max">
+                                  <CheckCircle2 size={13} /> Follow-up wysłany
                                 </span>
+                              ) : lead.offer ? (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedLead(lead);
+                                    setDrawerTab("email");
+                                  }}
+                                  className="text-[#FFE600] hover:text-black hover:bg-[#FFE600] font-bold flex items-center gap-1 border border-[#FFE600]/40 px-2.5 py-1 rounded-md transition-all cursor-pointer"
+                                  title="Oferta gotowa. Kliknij, aby przygotować wysyłkę"
+                                >
+                                  <Mail size={13} /> Wyślij e-mail
+                                </button>
                               ) : (
                                 <span className="text-[#64748B]">Oczekuje</span>
                               )}
@@ -1264,6 +1402,28 @@ export default function LeadMachineDashboard() {
                     <span className="text-xs text-[#94A3B8]">Duplikaty pominięte</span>
                     <div className="text-xl font-black text-white">{scraperResult.rejectedDuplicates}</div>
                   </div>
+                </div>
+
+                {/* Google Places Engine Status Badge */}
+                <div className="mt-4 p-3 bg-[#0A0E17] rounded-xl border border-[#28354D] text-xs flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[#94A3B8] font-bold flex items-center gap-1.5">
+                    <Globe size={14} className="text-[#38BDF8]" />
+                    Silnik pobierania danych:
+                  </span>
+                  {scraperResult.googlePlacesStatus === "OK" ? (
+                    <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2.5 py-1 rounded font-bold flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                      Google Places API (Połączono na żywo)
+                    </span>
+                  ) : scraperResult.googlePlacesStatus && scraperResult.googlePlacesStatus !== "OK" && scraperResult.googlePlacesStatus !== "FALLBACK_NO_KEY" ? (
+                    <span className="bg-amber-950 text-amber-300 border border-amber-800 px-2.5 py-1 rounded font-bold">
+                      ⚠️ Google Places: {scraperResult.googlePlacesError || scraperResult.googlePlacesStatus} (Użyto katalogu regionalnego)
+                    </span>
+                  ) : (
+                    <span className="bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-1 rounded font-bold">
+                      ℹ️ Katalog Regionalny (Legnica & Region)
+                    </span>
+                  )}
                 </div>
               </div>
             )}
@@ -1816,18 +1976,243 @@ export default function LeadMachineDashboard() {
 
             {/* TAB: EMAIL OUTREACH */}
             {drawerTab === "email" && (
-              <div className="space-y-4">
-                {selectedLead.offer ? (
-                  <div className="space-y-3">
+              <div className="space-y-5">
+                {!selectedLead.offer ? (
+                  <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl text-center space-y-3">
+                    <AlertTriangle size={32} className="mx-auto text-[#FFE600]" />
+                    <h4 className="text-base font-bold text-white">Brak opublikowanej oferty dla tej firmy</h4>
+                    <p className="text-xs text-[#94A3B8] max-w-md mx-auto">
+                      Zgodnie z zasadą zero-zmyślania i personalizacji Procent Marketing, outreach wymaga najpierw
+                      przeprowadzenia audytu i wygenerowania dedykowanej strony landing page.
+                    </p>
                     <button
-                      onClick={() => handleSendEmail(selectedLead.id)}
-                      className="w-full bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm py-2.5 rounded-lg flex items-center justify-center gap-2"
+                      onClick={() => {
+                        setDrawerTab("offer");
+                        handleGenerateOffer(selectedLead.id);
+                      }}
+                      className="bg-[#FFE600] text-black font-extrabold text-xs px-5 py-2.5 rounded-lg inline-flex items-center gap-2 hover:bg-[#FFF04D] transition-all cursor-pointer"
                     >
-                      <Mail size={16} /> Wyślij E-mail z Ofertą (Sandbox)
+                      <Zap size={14} /> Wygeneruj Ofertę i Wróć Tutaj
                     </button>
                   </div>
+                ) : outreachLoading ? (
+                  <div className="py-12 text-center text-[#94A3B8] text-sm flex items-center justify-center gap-2">
+                    <RefreshCw size={18} className="animate-spin text-[#FFE600]" />
+                    Ładowanie historii korespondencji i generowanie draftu AI...
+                  </div>
                 ) : (
-                  <p className="text-sm text-[#94A3B8]">Najpierw wygeneruj ofertę, aby móc skomponować e-mail.</p>
+                  <>
+                    {/* Status Banner */}
+                    {selectedLead.status === "followup_sent" ? (
+                      <div className="bg-indigo-950/40 border border-indigo-500/40 p-4 rounded-xl flex items-start gap-3">
+                        <CheckCircle2 size={20} className="text-indigo-400 mt-0.5 shrink-0" />
+                        <div>
+                          <h4 className="text-sm font-bold text-indigo-200">
+                            Pełna sekwencja zakończona (Follow-up wysłany)
+                          </h4>
+                          <p className="text-xs text-indigo-300/80 mt-1">
+                            Wysłano wstępny e-mail z audytem oraz jeden follow-up. Zgodnie z etyką B2B i nienarzucającym
+                            się kontaktem, system blokuje wysyłanie kolejnych wiadomości automatycznych do tej firmy.
+                          </p>
+                        </div>
+                      </div>
+                    ) : selectedLead.status === "sent" ? (
+                      <div className="bg-purple-950/40 border border-purple-500/40 p-4 rounded-xl flex items-start gap-3">
+                        <Clock size={20} className="text-purple-400 mt-0.5 shrink-0" />
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-bold text-purple-200">
+                              Wysłano e-mail wstępny — Blokada ponownej wysyłki
+                            </h4>
+                            <span className="text-[11px] bg-purple-900/60 text-purple-300 font-bold px-2 py-0.5 rounded">
+                              Oczekiwanie na odpowiedź
+                            </span>
+                          </div>
+                          <p className="text-xs text-purple-300/80 mt-1">
+                            Pierwsza wiadomość została już wysłana. System trwale blokuje wysłanie pierwszej wiadomości po raz drugi.
+                            Jeśli odbiorca nie odpisał, możesz poniżej uruchomić i wysłać <strong>spersonalizowany Follow-up AI</strong> w tym samym wątku (<code className="text-purple-200">Re: ...</code>).
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-emerald-950/30 border border-emerald-500/30 p-4 rounded-xl flex items-start gap-3">
+                        <Mail size={20} className="text-emerald-400 mt-0.5 shrink-0" />
+                        <div>
+                          <h4 className="text-sm font-bold text-emerald-200">
+                            Gotowy do pierwszej wysyłki (Outreach Sandbox)
+                          </h4>
+                          <p className="text-xs text-emerald-300/80 mt-1">
+                            Oferta i audyt są gotowe. Wiadomość zostanie wysłana z zachowaniem klauzuli RODO (art. 14)
+                            i stopki rezygnacji. W trybie testowym wiadomość trafi na Twój adres weryfikacyjny.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Message Parameters */}
+                    <div className="grid grid-cols-2 gap-3 text-xs bg-[#141C2E] p-3.5 rounded-xl border border-[#28354D]">
+                      <div>
+                        <span className="text-[#94A3B8] block mb-0.5">Odbiorca docelowy (strona www/rejestr):</span>
+                        <span className="text-white font-mono font-bold truncate block">
+                          {selectedLead.emailPrimary || "brak e-maila w rekordzie"}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[#94A3B8] block mb-0.5">Tryb wysyłki:</span>
+                        <span className="text-[#38BDF8] font-bold block truncate">
+                          LIVE_MODE=false (Sandbox → TEST_RECIPIENTS)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Composer Editor (Active if not followup_sent) */}
+                    {selectedLead.status !== "followup_sent" ? (
+                      <div className="bg-[#141C2E] border border-[#28354D] p-4 rounded-xl space-y-3">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                            {selectedLead.status === "sent" ? (
+                              <>
+                                <Sparkles size={14} className="text-[#FFE600]" />
+                                Szkic Follow-up AI (Gemini):
+                              </>
+                            ) : (
+                              <>
+                                <Mail size={14} className="text-[#FFE600]" />
+                                Szkic Pierwszej Wiadomości:
+                              </>
+                            )}
+                          </label>
+
+                          {selectedLead.status === "sent" && (
+                            <button
+                              onClick={handleRegenerateFollowupAi}
+                              disabled={outreachAiGenerating}
+                              className="text-xs text-[#FFE600] hover:text-[#FFF04D] flex items-center gap-1 font-bold disabled:opacity-50 cursor-pointer"
+                              title="Odśwież wersję wygenerowaną przez Gemini AI"
+                            >
+                              <RefreshCw size={12} className={outreachAiGenerating ? "animate-spin" : ""} />
+                              Przeładuj z AI
+                            </button>
+                          )}
+                        </div>
+
+                        <div>
+                          <span className="text-[11px] text-[#94A3B8] block mb-1">Temat wiadomości:</span>
+                          <input
+                            type="text"
+                            value={outreachSubject}
+                            onChange={(e) => setOutreachSubject(e.target.value)}
+                            className="w-full bg-[#0A0E17] border border-[#28354D] focus:border-[#FFE600] rounded-lg px-3 py-2 text-xs text-white outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-[11px] text-[#94A3B8]">Treść wiadomości:</span>
+                            <span className="text-[10px] text-[#64748B]">
+                              {outreachBody.split(/\s+/).filter(Boolean).length} słów | {outreachBody.length} znaków
+                            </span>
+                          </div>
+                          <textarea
+                            rows={9}
+                            value={outreachBody}
+                            onChange={(e) => setOutreachBody(e.target.value)}
+                            className="w-full bg-[#0A0E17] border border-[#28354D] focus:border-[#FFE600] rounded-lg p-3 text-xs text-white font-mono leading-relaxed outline-none"
+                          />
+                        </div>
+
+                        <div className="pt-2">
+                          {selectedLead.status === "sent" ? (
+                            <button
+                              onClick={() => handleSendOutreachFromDrawer(true)}
+                              disabled={outreachSending}
+                              className="w-full bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#4F46E5] hover:to-[#7C3AED] text-white font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                            >
+                              <Sparkles size={16} />
+                              {outreachSending ? "Wysyłanie Follow-up..." : "Wyślij Follow-up AI (wątek Re:...)"}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleSendOutreachFromDrawer(false)}
+                              disabled={outreachSending}
+                              className="w-full bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/10 disabled:opacity-50 transition-all cursor-pointer"
+                            >
+                              <Send size={16} />
+                              {outreachSending ? "Wysyłanie e-maila..." : "Wyślij Pierwszy E-mail z Ofertą"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="bg-[#141C2E] border border-[#28354D] p-5 rounded-xl text-center space-y-2">
+                        <CheckCircle2 size={28} className="mx-auto text-indigo-400" />
+                        <h4 className="text-sm font-bold text-white">Sekwencja outreach jest ukończona</h4>
+                        <p className="text-xs text-[#94A3B8]">
+                          Wszystkie dopuszczalne wiadomości (wstępna + follow-up) zostały wysłane.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Message History Timeline */}
+                    <div className="space-y-3 pt-2">
+                      <div className="flex items-center justify-between border-b border-[#28354D] pb-2">
+                        <h4 className="text-xs uppercase tracking-wider font-extrabold text-[#94A3B8] flex items-center gap-2">
+                          <MessageSquare size={14} />
+                          Historia wiadomości ({outreachData?.messages?.length || 0})
+                        </h4>
+                      </div>
+
+                      {outreachData?.messages && outreachData.messages.length > 0 ? (
+                        <div className="space-y-2.5">
+                          {outreachData.messages.map((msg: any) => (
+                            <div
+                              key={msg.id}
+                              className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl space-y-2 text-xs"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                      msg.direction === "outbound"
+                                        ? "bg-purple-950 text-purple-300 border border-purple-800"
+                                        : "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                                    }`}
+                                  >
+                                    {msg.direction === "outbound" ? "Wychodząca" : "Odpowiedź"}
+                                  </span>
+                                  <span className="font-bold text-white">{msg.subject}</span>
+                                </div>
+                                <span className="text-[11px] text-[#64748B]">
+                                  {msg.sentAt
+                                    ? new Date(msg.sentAt).toLocaleString("pl-PL")
+                                    : msg.createdAt
+                                    ? new Date(msg.createdAt).toLocaleString("pl-PL")
+                                    : "—"}
+                                </span>
+                              </div>
+
+                              <p className="text-[#94A3B8] whitespace-pre-wrap font-mono text-[11px] bg-[#0A0E17] p-2.5 rounded-lg border border-[#1E293B]">
+                                {msg.bodyText}
+                              </p>
+
+                              <div className="flex items-center justify-between text-[11px] text-[#64748B] pt-1">
+                                <span>
+                                  Odbiorca: <strong className="text-[#CBD5E1]">{msg.recipient}</strong>
+                                </span>
+                                <span>
+                                  Status: <strong className="text-emerald-400">{msg.status}</strong>
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-[#64748B] italic py-2">
+                          Brak wcześniejszych wiadomości w bazie dla tego leada.
+                        </p>
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
             )}

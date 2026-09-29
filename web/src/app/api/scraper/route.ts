@@ -292,16 +292,25 @@ export async function POST(req: Request) {
     // 1. Check if Google Places API Key is present in environment
     const googleApiKey = process.env.GOOGLE_MAPS_API_KEY || process.env.GOOGLE_PLACES_KEY;
 
+    let googlePlacesStatus = null;
+    let googlePlacesError = null;
+
     if (googleApiKey) {
       try {
-        const query = encodeURIComponent(`${keyword} ${city}`);
+        const query = encodeURIComponent(`${keyword} ${city} Polska`);
         const placesUrl = `https://maps.googleapis.com/maps/api/place/textsearch/json?query=${query}&key=${googleApiKey}`;
         const res = await fetch(placesUrl);
         const data = await res.json();
 
-        if (data.results && Array.isArray(data.results)) {
+        googlePlacesStatus = data.status;
+        if (data.status !== "OK") {
+          googlePlacesError = data.error_message || `Google Places status: ${data.status}`;
+          console.warn("Google Places API response:", data.status, data.error_message);
+        }
+
+        if (data.results && Array.isArray(data.results) && data.results.length > 0) {
           // Process top results and enrich with Place Details (website, phone)
-          for (const p of data.results.slice(0, 10)) {
+          for (const p of data.results.slice(0, 15)) {
             let phone = "";
             let website = "";
 
@@ -329,7 +338,8 @@ export async function POST(req: Request) {
             });
           }
         }
-      } catch (err) {
+      } catch (err: any) {
+        googlePlacesError = err?.message || String(err);
         console.warn("Google Places fetch error, using regional catalog:", err);
       }
     }

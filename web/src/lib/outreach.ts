@@ -4,6 +4,7 @@ import path from "path";
 import nodemailer from "nodemailer";
 import { db, messages, suppression } from "./db";
 import { eq, or } from "drizzle-orm";
+import { GoogleGenAI } from "@google/genai";
 
 export interface EmailDraft {
   recipientEmail: string;
@@ -103,14 +104,136 @@ Aby zrezygnować z dalszego kontaktu, prosimy o odpowiedź na tę wiadomość o 
   };
 }
 
+/**
+ * Generate AI-grounded personalized follow-up in the same thread
+ */
+export async function composeFollowupEmail(
+  lead: {
+    companyName: string;
+    city?: string | null;
+    industry?: string | null;
+    emailPrimary?: string | null;
+  },
+  offer: {
+    title: string;
+    deployUrl?: string | null;
+    bookingUrl?: string | null;
+  },
+  originalSubject?: string | null,
+  contactName?: string | null
+): Promise<EmailDraft> {
+  const salutation = contactName ? `Dzień dobry Panie/Pani ${contactName},` : "Dzień dobry,";
+  const offerUrl = offer.deployUrl || offer.bookingUrl || "https://procentmarketing.pl";
+  const city = lead.city || "Legnicy";
+  const prevSub = originalSubject || `${lead.companyName} — dedykowana strategia automatyzacji (${city})`;
+  const subject = prevSub.startsWith("Re:") ? prevSub : `Re: ${prevSub}`;
+
+  // Try Gemini AI if API key is configured
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `Jesteś specjalistą ds. rozwoju w agencji Procent Marketing z Legnicy.
+Napisz krótki, uprzejmy e-mail follow-up do firmy "${lead.companyName}" (${lead.industry || "usługi"}, miasto: ${city}).
+Wcześniej wysłano analizę pod adresem: ${offerUrl}. Nikt nie odpisał.
+
+ZASADY:
+1. Objętość: 45-65 słów (bardzo zwięźle, szanuj czas odbiorcy).
+2. Ton: profesjonalny, bez narzucania się. Zakaz pisania: "Ponawiam kontakt", "Czy miał Pan okazję przeczytać", "Przypominam się".
+3. Zaoferuj 1 konkretną wartość (np. bezpłatną 15-minutową konsultację online, gotowość do omówienia potencjału automatyzacji zapytań z rejonu ${city}).
+4. Umieść link do oferty: ${offerUrl}.
+5. Podpis: Dariusz Rink, Procent Marketing, ul. M. Rataja 15, Legnica.
+6. Stopka: 'Aby zrezygnować, odpowiedz STOP.'
+
+Zwróć wynik jako JSON:
+{
+  "bodyText": "treść czystego tekstu",
+  "bodyHtml": "treść HTML z akapitami <p> i linkiem <a href=...>"
+}`;
+
+      const res = await ai.models.generateContent({
+        model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          temperature: 0.2,
+        },
+      });
+
+      if (res.text) {
+        const parsed = JSON.parse(res.text);
+        if (parsed.bodyText) {
+          return {
+            recipientEmail: lead.emailPrimary || "kontakt@procentmarketing.pl",
+            subject,
+            bodyText: parsed.bodyText,
+            bodyHtml: parsed.bodyHtml || parsed.bodyText.replace(/\n/g, "<br/>"),
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("Gemini follow-up generation fallback to template:", err);
+    }
+  }
+
+  // Deterministic fallback template
+  const bodyText = `${salutation}
+
+Pozwalam sobie nawiązać do przesłanej analizy obecności w sieci dla firmy ${lead.companyName}.
+
+W ramach przygotowanego materiału zmapowaliśmy ścieżkę zapytań w rejonie ${city} oraz moduły usprawniające pozyskiwanie klientów:
+👉 ${offerUrl}
+
+Chętnie poświęcę 15 minut na krótką, bezpłatną rozmowę, aby omówić z Państwem najważniejsze wnioski i możliwości wdrożenia.
+
+Z poważaniem,
+Dariusz Rink
+Procent Marketing (AM PROCENT Sp. z o.o.)
+ul. M. Rataja 15, 59-220 Legnica
+NIP: 6912590158 | www.procentmarketing.pl
+
+---
+Aby zrezygnować z dalszego kontaktu, prosimy o odpowiedź 'STOP'.`;
+
+  const bodyHtml = `
+  <div style="font-family: Arial, sans-serif; color: #1E293B; line-height: 1.6; max-width: 600px;">
+    <p>${salutation}</p>
+    <p>Pozwalam sobie nawiązać do przesłanej analizy dla firmy <strong>${lead.companyName}</strong>.</p>
+    <p>W ramach przygotowanego materiału zmapowaliśmy ścieżkę zapytań w rejonie <strong>${city}</strong> oraz moduły usprawniające pozyskiwanie klientów:</p>
+    
+    <div style="margin: 20px 0;">
+      <a href="${offerUrl}" style="background-color: #FFE600; color: #000; padding: 10px 20px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block;">
+        👉 Otwórz analizę dla ${lead.companyName}
+      </a>
+    </div>
+
+    <p>Chętnie poświęcę 15 minut na krótką, bezpłatną rozmowę, aby omówić z Państwem najważniejsze wnioski.</p>
+    <p>Z poważaniem,<br/>
+    <strong>Dariusz Rink</strong><br/>
+    Procent Marketing (AM PROCENT Sp. z o.o.)<br/>
+    ul. M. Rataja 15, 59-220 Legnica | <a href="https://procentmarketing.pl">procentmarketing.pl</a></p>
+    <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 25px 0 10px 0;" />
+    <p style="font-size: 11px; color: #64748B;">Aby zrezygnować z kontaktu, odpowiedz 'STOP'.</p>
+  </div>`;
+
+  return {
+    recipientEmail: lead.emailPrimary || "kontakt@procentmarketing.pl",
+    subject,
+    bodyText,
+    bodyHtml,
+  };
+}
+
 export async function sendEmailSafely(params: {
   leadId: number;
   draft: EmailDraft;
   leadNip?: string | null;
   leadPhone?: string | null;
   ignoreWindow?: boolean;
+  isFollowup?: boolean;
+  inReplyTo?: string | null;
 }): Promise<SendResult> {
-  const { leadId, draft, leadNip, leadPhone, ignoreWindow } = params;
+  const { leadId, draft, leadNip, leadPhone, ignoreWindow, isFollowup, inReplyTo } = params;
 
   // 1. Kill-Switch Check
   const killSwitchFileName = process.env.KILL_SWITCH_FILE || "STOP";
@@ -161,7 +284,7 @@ export async function sendEmailSafely(params: {
   }
 
   // 4. Idempotency Check
-  const idempString = `${leadId}:${draft.subject}:email`;
+  const idempString = isFollowup ? `${leadId}:${draft.subject}:followup:email` : `${leadId}:${draft.subject}:email`;
   const idempotencyKey = crypto.createHash("sha256").update(idempString).digest("hex");
 
   const existingMsg = await db
@@ -174,7 +297,9 @@ export async function sendEmailSafely(params: {
     return {
       success: false,
       messageId: null,
-      errorMessage: "Wiadomość z tym kluczem idempotencji została już zarejestrowana",
+      errorMessage: isFollowup
+        ? "Wiadomość Follow-up została już wysłana do tego leada!"
+        : "Wiadomość z tym kluczem idempotencji została już zarejestrowana",
       wasTestMode: true,
       recipient: draft.recipientEmail,
     };
@@ -196,6 +321,7 @@ export async function sendEmailSafely(params: {
       channel: "email",
       status: "draft",
       idempotencyKey,
+      inReplyTo: inReplyTo || undefined,
       subject: draft.subject,
       bodyText: draft.bodyText,
       bodyHtml: draft.bodyHtml,
