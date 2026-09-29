@@ -1,5 +1,6 @@
 """Configuration management using Pydantic Settings and YAML files."""
 
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -131,6 +132,19 @@ def load_yaml_config(file_path: Path) -> Dict[str, Any]:
 
 @lru_cache()
 def get_settings() -> Settings:
+    # Sync Streamlit Community Cloud secrets into os.environ if present
+    try:
+        import streamlit as st
+        try:
+            for k, v in st.secrets.items():
+                if isinstance(v, (str, int, float, bool)):
+                    os.environ.setdefault(k.upper(), str(v))
+                    os.environ.setdefault(k.lower(), str(v))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
     settings_yaml = load_yaml_config(PROJECT_ROOT / "config" / "settings.yaml")
 
     geo_data = settings_yaml.get("geo", {})
