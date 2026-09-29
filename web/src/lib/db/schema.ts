@@ -157,6 +157,38 @@ export const events = pgTable("events", {
   createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
 });
 
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  email: varchar("email", { length: 255 }).unique().notNull(),
+  passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+  name: varchar("name", { length: 100 }).notNull(),
+  role: varchar("role", { length: 50 }).default("admin").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
+export const invitations = pgTable("invitations", {
+  id: serial("id").primaryKey(),
+  code: varchar("code", { length: 64 }).unique().notNull(),
+  email: varchar("email", { length: 255 }),
+  role: varchar("role", { length: 50 }).default("member").notNull(),
+  createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  maxUses: integer("max_uses").default(1).notNull(),
+  usedCount: integer("used_count").default(0).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: false }),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
+export const sessions = pgTable("sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  token: varchar("token", { length: 128 }).unique().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: false }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
 // Relations
 export const leadsRelations = relations(leads, ({ one, many }) => ({
   audit: one(audits, {
@@ -197,5 +229,24 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   lead: one(leads, {
     fields: [messages.leadId],
     references: [leads.id],
+  }),
+}));
+
+export const usersRelations = relations(users, ({ many }) => ({
+  sessions: many(sessions),
+  invitationsCreated: many(invitations),
+}));
+
+export const invitationsRelations = relations(invitations, ({ one }) => ({
+  createdBy: one(users, {
+    fields: [invitations.createdById],
+    references: [users.id],
+  }),
+}));
+
+export const sessionsRelations = relations(sessions, ({ one }) => ({
+  user: one(users, {
+    fields: [sessions.userId],
+    references: [users.id],
   }),
 }));

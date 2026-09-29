@@ -35,6 +35,10 @@ import {
   Clock,
   MessageSquare,
   ArrowRight,
+  User,
+  Users,
+  LogOut,
+  Copy,
 } from "lucide-react";
 
 interface LeadItem {
@@ -68,7 +72,19 @@ export default function LeadMachineDashboard() {
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [activeTab, setActiveTab] = useState<"crm" | "generator" | "review" | "import" | "settings">("crm");
+  const [activeTab, setActiveTab] = useState<"crm" | "generator" | "review" | "import" | "settings" | "team">("crm");
+
+  // Auth & Team state
+  const [currentUser, setCurrentUser] = useState<{ id: number; email: string; name: string; role: string } | null>(null);
+  const [invitationsList, setInvitationsList] = useState<any[]>([]);
+  const [teamUsersList, setTeamUsersList] = useState<any[]>([]);
+  const [bootstrapCode, setBootstrapCode] = useState<string>("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState("member");
+  const [inviteMaxUses, setInviteMaxUses] = useState(1);
+  const [inviteExpiresInDays, setInviteExpiresInDays] = useState(7);
+  const [inviteGenerating, setInviteGenerating] = useState(false);
+  const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null);
   
   // Selected lead for Slide-Over Drawer
   const [selectedLead, setSelectedLead] = useState<LeadItem | null>(null);
@@ -191,9 +207,99 @@ export default function LeadMachineDashboard() {
     }
   };
 
+  // Fetch Current User
+  const fetchCurrentUser = async () => {
+    try {
+      const res = await fetch("/api/auth/me");
+      const data = await res.json();
+      if (data.success && data.user) {
+        setCurrentUser(data.user);
+      }
+    } catch {}
+  };
+
+  // Fetch Invitations and Team
+  const fetchTeamData = async () => {
+    try {
+      const res = await fetch("/api/auth/invitations");
+      const data = await res.json();
+      if (data.success) {
+        setInvitationsList(data.invitations || []);
+        setTeamUsersList(data.users || []);
+        if (data.bootstrapCode) setBootstrapCode(data.bootstrapCode);
+      }
+    } catch {}
+  };
+
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      window.location.href = "/login";
+    } catch {
+      window.location.href = "/login";
+    }
+  };
+
+  // Create Invitation handler
+  const handleCreateInvitation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setInviteGenerating(true);
+    showToast("Generowanie zaproszenia...", "info");
+    try {
+      const res = await fetch("/api/auth/invitations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: inviteEmail || undefined,
+          role: inviteRole,
+          maxUses: inviteMaxUses,
+          expiresInDays: inviteExpiresInDays,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGeneratedInviteUrl(data.inviteUrl);
+        showToast("Wygenerowano nowe zaproszenie!", "success");
+        setInviteEmail("");
+        fetchTeamData();
+      } else {
+        showToast(data.error || "Błąd generowania zaproszenia", "error");
+      }
+    } catch {
+      showToast("Błąd serwera", "error");
+    } finally {
+      setInviteGenerating(false);
+    }
+  };
+
+  // Revoke Invitation handler
+  const handleRevokeInvitation = async (id: number) => {
+    if (!confirm("Czy na pewno chcesz unieważnić to zaproszenie?")) return;
+    try {
+      const res = await fetch(`/api/auth/invitations/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        showToast("Zaproszenie unieważnione");
+        fetchTeamData();
+      } else {
+        showToast(data.error || "Błąd usuwania", "error");
+      }
+    } catch {
+      showToast("Błąd serwera", "error");
+    }
+  };
+
   useEffect(() => {
     fetchLeads();
+    fetchCurrentUser();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "team") {
+      fetchTeamData();
+    }
+  }, [activeTab]);
 
   // When drawer opens or switches to email tab, fetch message history and drafts
   useEffect(() => {
@@ -852,6 +958,30 @@ export default function LeadMachineDashboard() {
             >
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
             </button>
+
+            {/* User Profile & Logout */}
+            {currentUser && (
+              <div className="flex items-center gap-2.5 pl-3 border-l border-[#28354D]">
+                <div className="text-right hidden sm:block">
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5 justify-end">
+                    <User size={13} className="text-[#FFE600]" />
+                    {currentUser.name}
+                  </div>
+                  <div className="text-[10px] text-[#94A3B8] font-mono flex items-center gap-1 justify-end">
+                    <span className="truncate max-w-[130px]">{currentUser.email}</span>
+                    <span>•</span>
+                    <span className="text-[#FFE600] font-bold uppercase">{currentUser.role}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="bg-[#1E293B] hover:bg-[#881337] border border-[#334155] hover:border-[#E11D48] text-[#94A3B8] hover:text-white p-2 rounded-lg transition-all"
+                  title="Wyloguj się z systemu"
+                >
+                  <LogOut size={16} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </header>
@@ -933,6 +1063,17 @@ export default function LeadMachineDashboard() {
           >
             <SettingsIcon size={16} />
             Ustawienia & Reguły
+          </button>
+          <button
+            onClick={() => setActiveTab("team")}
+            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all ${
+              activeTab === "team"
+                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
+                : "text-[#94A3B8] hover:text-white"
+            }`}
+          >
+            <Users size={16} />
+            Zespół & Zaproszenia
           </button>
         </div>
 
@@ -1961,6 +2102,239 @@ export default function LeadMachineDashboard() {
                 <Save size={16} />
                 {settingsLoading ? "Zapisywanie..." : "Zapisz Wszystkie Ustawienia"}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* TAB: TEAM & INVITATIONS */}
+        {activeTab === "team" && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            {/* Header / Intro Card */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-[#FFE600] flex items-center gap-2">
+                  <Users size={22} />
+                  <span>Dostęp Zamknięty & Zarządzanie Zespołem</span>
+                </h2>
+                <p className="text-xs text-[#94A3B8] mt-1">
+                  Lead Machine 2.0 działa w trybie autoryzowanym (Invite-Only). Nowi użytkownicy mogą zarejestrować się wyłącznie po otrzymaniu unikalnego linku lub kodu zaproszenia.
+                </p>
+              </div>
+              {bootstrapCode && (
+                <div className="p-3 bg-[#0A0E17] rounded-xl border border-[#FFE600]/40 text-xs">
+                  <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Kod startowy (Master):</span>
+                  <code className="text-[#FFE600] font-mono font-bold select-all">{bootstrapCode}</code>
+                </div>
+              )}
+            </div>
+
+            {/* Create Invitation Form */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
+              <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
+                <Sparkles size={18} className="text-[#FFE600]" />
+                Wygeneruj Nowe Zaproszenie
+              </h3>
+
+              <form onSubmit={handleCreateInvitation} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                    Adres E-mail Odbiorcy (opcjonalnie)
+                  </label>
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="Wpisz lub zostaw puste (otwarte)"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                    Rola w Systemie
+                  </label>
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value)}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  >
+                    <option value="member">Członek Zespołu (Member)</option>
+                    <option value="admin">Administrator (Pełne uprawnienia)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                    Ważność Linku
+                  </label>
+                  <select
+                    value={inviteExpiresInDays}
+                    onChange={(e) => setInviteExpiresInDays(Number(e.target.value))}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  >
+                    <option value={1}>24 godziny</option>
+                    <option value={7}>7 dni (zalecane)</option>
+                    <option value={30}>30 dni</option>
+                    <option value={0}>Bezterminowo</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                    Maksymalna Liczba Użyć
+                  </label>
+                  <select
+                    value={inviteMaxUses}
+                    onChange={(e) => setInviteMaxUses(Number(e.target.value))}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  >
+                    <option value={1}>1 osoba (jednorazowe)</option>
+                    <option value={3}>Do 3 osób</option>
+                    <option value={10}>Do 10 osób</option>
+                    <option value={999}>Wielokrotnego użytku</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2 lg:col-span-4 flex items-center justify-end pt-2">
+                  <button
+                    type="submit"
+                    disabled={inviteGenerating}
+                    className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-6 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50 cursor-pointer"
+                  >
+                    <Key size={16} />
+                    {inviteGenerating ? "Generowanie..." : "Generuj Link Zaproszenia"}
+                  </button>
+                </div>
+              </form>
+
+              {/* Display Generated URL */}
+              {generatedInviteUrl && (
+                <div className="mt-5 p-4 bg-[#0A0E17] border border-[#FFE600]/60 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in">
+                  <div className="w-full overflow-hidden">
+                    <span className="text-[11px] font-bold text-[#FFE600] block uppercase tracking-wider mb-0.5">
+                      Gotowy Link Zaproszenia dla Współpracownika:
+                    </span>
+                    <input
+                      type="text"
+                      readOnly
+                      value={generatedInviteUrl}
+                      className="w-full bg-transparent text-sm text-white font-mono border-none focus:outline-none select-all"
+                    />
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedInviteUrl);
+                      showToast("Skopiowano link do schowka!", "success");
+                    }}
+                    className="shrink-0 bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8]/60 text-[#38BDF8] font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Copy size={14} /> Kopiuj Link
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Active Invitations Table */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
+              <h3 className="text-base font-bold text-white mb-3">Aktywne Kody i Zaproszenia</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#0A0E17] text-[#94A3B8] font-bold uppercase tracking-wider">
+                    <tr>
+                      <th className="p-3">Kod Zaproszenia</th>
+                      <th className="p-3">Dedykowany E-mail</th>
+                      <th className="p-3">Rola</th>
+                      <th className="p-3">Użycia</th>
+                      <th className="p-3">Wygasa</th>
+                      <th className="p-3 text-right">Akcje</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#28354D]">
+                    {invitationsList.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="p-4 text-center text-[#94A3B8]">
+                          Brak aktywnych zaproszeń. Wygeneruj nowe powyżej.
+                        </td>
+                      </tr>
+                    ) : (
+                      invitationsList.map((inv) => (
+                        <tr key={inv.id} className="hover:bg-[#1E293B]/40">
+                          <td className="p-3 font-mono font-bold text-white">{inv.code}</td>
+                          <td className="p-3 text-[#CBD5E1]">{inv.email || "Otwarte (dowolny e-mail)"}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${inv.role === "admin" ? "bg-amber-950 text-amber-300 border border-amber-800" : "bg-blue-950 text-blue-300 border border-blue-800"}`}>
+                              {inv.role}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono">{inv.usedCount} / {inv.maxUses}</td>
+                          <td className="p-3 text-[#94A3B8]">
+                            {inv.expiresAt ? new Date(inv.expiresAt).toLocaleDateString() : "Bezterminowo"}
+                          </td>
+                          <td className="p-3 text-right space-x-2">
+                            <button
+                              onClick={() => {
+                                const url = `${window.location.origin}/invite?code=${inv.code}`;
+                                navigator.clipboard.writeText(url);
+                                showToast("Skopiowano link zaproszenia!", "success");
+                              }}
+                              className="text-[#38BDF8] hover:underline cursor-pointer"
+                            >
+                              Kopiuj link
+                            </button>
+                            <button
+                              onClick={() => handleRevokeInvitation(inv.id)}
+                              className="text-[#FB7185] hover:underline ml-2 cursor-pointer"
+                            >
+                              Unieważnij
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Team Members List */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
+              <h3 className="text-base font-bold text-white mb-3">Zarejestrowani Użytkownicy ({teamUsersList.length})</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-[#0A0E17] text-[#94A3B8] font-bold uppercase tracking-wider">
+                    <tr>
+                      <th className="p-3">Imię i Nazwisko</th>
+                      <th className="p-3">Adres E-mail</th>
+                      <th className="p-3">Rola</th>
+                      <th className="p-3">Data dołączenia</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#28354D]">
+                    {teamUsersList.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="p-4 text-center text-[#94A3B8]">
+                          Brak użytkowników
+                        </td>
+                      </tr>
+                    ) : (
+                      teamUsersList.map((u) => (
+                        <tr key={u.id} className="hover:bg-[#1E293B]/40">
+                          <td className="p-3 font-bold text-white">{u.name}</td>
+                          <td className="p-3 font-mono text-[#CBD5E1]">{u.email}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${u.role === "admin" ? "bg-amber-950 text-amber-300 border border-amber-800" : "bg-blue-950 text-blue-300 border border-blue-800"}`}>
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="p-3 text-[#94A3B8]">
+                            {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

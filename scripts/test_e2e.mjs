@@ -19,9 +19,37 @@ async function runTest() {
     }
   }
 
+  // STEP 0: Authenticate
+  console.log("\n--- STEP 0: Authenticating Test Suite ---");
+  const authEmail = `e2e_tester_${Date.now()}@procentmarketing.pl`;
+  const resAuth = await fetch(`${BASE_URL}/api/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      inviteCode: "PROCENT-START-2026",
+      email: authEmail,
+      password: "TestPassword123!",
+      name: "E2E Tester",
+    }),
+  });
+  const rawCookie = resAuth.headers.get("set-cookie") || "";
+  const cookieMatch = rawCookie.match(/pm_session_token=([^;]+)/);
+  const sessionToken = cookieMatch ? cookieMatch[1] : "";
+  const cookieHeader = `pm_session_token=${sessionToken}`;
+  assert(sessionToken.length > 0, "Test suite authenticated with master session cookie");
+
+  const originalFetch = fetch;
+  const authFetch = (url, options = {}) => {
+    const headers = { ...options.headers };
+    if (!headers.Cookie && !headers.cookie) {
+      headers.Cookie = cookieHeader;
+    }
+    return originalFetch(url, { ...options, headers });
+  };
+
   // TEST 1: Preset Scraper (Fotowoltaika)
   console.log("\n--- TEST 1: Testing Preset Scraper (Fotowoltaika) ---");
-  const resScraper = await fetch(`${BASE_URL}/api/scraper`, {
+  const resScraper = await authFetch(`${BASE_URL}/api/scraper`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ keyword: "Fotowoltaika", city: "Chojnów", radiusKm: 30 }),
@@ -33,7 +61,7 @@ async function runTest() {
 
   // TEST 2: Strict Wrocław Zero Tolerance Check via CSV import
   console.log("\n--- TEST 2: Testing Strict Wrocław Zero Tolerance via CSV import ---");
-  const resWroclaw = await fetch(`${BASE_URL}/api/scraper`, {
+  const resWroclaw = await authFetch(`${BASE_URL}/api/scraper`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -64,27 +92,41 @@ async function runTest() {
 
   // TEST 3: Fetch Leads
   console.log("\n--- TEST 3: Fetching Leads from Neon Database ---");
-  const resLeads = await fetch(`${BASE_URL}/api/leads`);
+  const resLeads = await authFetch(`${BASE_URL}/api/leads`);
   const dataLeads = await resLeads.json();
   assert(dataLeads.success === true, "Leads API returned success");
   assert(Array.isArray(dataLeads.leads) && dataLeads.leads.length > 0, `Neon DB has ${dataLeads.leads?.length} leads`);
 
-  const targetLead =
-    dataLeads.leads.find((l) => l.website && l.website.startsWith("http") && l.status === "new") ||
-    dataLeads.leads.find((l) => l.website && l.website.startsWith("http")) ||
-    dataLeads.leads[0];
+  let targetLead = dataLeads.leads.find((l) => l.website && l.website.startsWith("http") && l.status === "new");
+  if (!targetLead) {
+    const resCreate = await authFetch(`${BASE_URL}/api/leads`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        companyName: `Nowa Klinika Legnica Test ${Date.now()}`,
+        city: "Legnica",
+        address: "ul. Jaworzyńska 12, Legnica",
+        website: "https://nowaklinika-legnica-test.pl",
+        email: "kontakt@nowaklinika-test.pl",
+        phone: "+48 76 811 22 33",
+        industry: "Stomatologia",
+      }),
+    });
+    const dataCreate = await resCreate.json();
+    targetLead = dataCreate.lead;
+  }
   console.log(`Selected Lead for E2E Pipeline: ID #${targetLead.id} - ${targetLead.companyName} (${targetLead.website}) [status=${targetLead.status}]`);
 
   // TEST 4: Run Web Audit
   console.log(`\n--- TEST 4: Running Web Audit on Lead #${targetLead.id} ---`);
-  const resAudit = await fetch(`${BASE_URL}/api/audit/${targetLead.id}`, { method: "POST" });
+  const resAudit = await authFetch(`${BASE_URL}/api/audit/${targetLead.id}`, { method: "POST" });
   const dataAudit = await resAudit.json();
   console.log("Audit result:", dataAudit);
   assert(dataAudit.success === true, "Web audit completed successfully with evidence");
 
   // TEST 5: Run Qualification
   console.log(`\n--- TEST 5: Running Qualification Matrix on Lead #${targetLead.id} ---`);
-  const resQualify = await fetch(`${BASE_URL}/api/qualify/${targetLead.id}`, { method: "POST" });
+  const resQualify = await authFetch(`${BASE_URL}/api/qualify/${targetLead.id}`, { method: "POST" });
   const dataQualify = await resQualify.json();
   console.log("Qualify result:", dataQualify);
   assert(dataQualify.success === true, "Qualification matrix calculated score and status");
@@ -92,7 +134,7 @@ async function runTest() {
 
   // TEST 6: Generate Offer
   console.log(`\n--- TEST 6: Generating Offer on Lead #${targetLead.id} ---`);
-  const resOffer = await fetch(`${BASE_URL}/api/offers/${targetLead.id}`, { method: "POST" });
+  const resOffer = await authFetch(`${BASE_URL}/api/offers/${targetLead.id}`, { method: "POST" });
   const dataOffer = await resOffer.json();
   console.log("Offer result:", dataOffer);
   assert(dataOffer.success === true, "Offer generated and published");
@@ -108,7 +150,7 @@ async function runTest() {
 
   // TEST 8: Send Outreach Email
   console.log(`\n--- TEST 8: Sending Compliant Outreach Email for Lead #${targetLead.id} ---`);
-  const resOutreach = await fetch(`${BASE_URL}/api/outreach/${targetLead.id}`, { method: "POST" });
+  const resOutreach = await authFetch(`${BASE_URL}/api/outreach/${targetLead.id}`, { method: "POST" });
   const dataOutreach = await resOutreach.json();
   console.log("Outreach result:", dataOutreach);
   assert(dataOutreach.success === true, "Outreach dispatch completed");
@@ -116,7 +158,7 @@ async function runTest() {
 
   // TEST 8B: Strict Anti-Duplicate Prevention (Cannot send initial email twice)
   console.log(`\n--- TEST 8B: Testing Anti-Duplicate Protection on Lead #${targetLead.id} ---`);
-  const resDup = await fetch(`${BASE_URL}/api/outreach/${targetLead.id}`, { method: "POST" });
+  const resDup = await authFetch(`${BASE_URL}/api/outreach/${targetLead.id}`, { method: "POST" });
   const dataDup = await resDup.json();
   console.log("Duplicate check response:", dataDup);
   assert(resDup.status === 400 && dataDup.success === false, "Duplicate initial email unconditionally blocked");
@@ -124,7 +166,7 @@ async function runTest() {
 
   // TEST 8C: Sending AI Follow-up (in the same email thread)
   console.log(`\n--- TEST 8C: Sending AI Follow-up for Lead #${targetLead.id} ---`);
-  const resFollowup = await fetch(`${BASE_URL}/api/outreach/${targetLead.id}`, {
+  const resFollowup = await authFetch(`${BASE_URL}/api/outreach/${targetLead.id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ isFollowup: true }),
@@ -136,7 +178,7 @@ async function runTest() {
 
   // TEST 8D: Blocking Second Follow-up (Maximum 1 follow-up permitted)
   console.log(`\n--- TEST 8D: Testing Second Follow-up Block on Lead #${targetLead.id} ---`);
-  const resFollowup2 = await fetch(`${BASE_URL}/api/outreach/${targetLead.id}`, {
+  const resFollowup2 = await authFetch(`${BASE_URL}/api/outreach/${targetLead.id}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ isFollowup: true }),
@@ -147,7 +189,7 @@ async function runTest() {
 
   // TEST 9: Mail Settings API
   console.log("\n--- TEST 9: Getting Mail and API Settings ---");
-  const resSettings = await fetch(`${BASE_URL}/api/settings/mail`);
+  const resSettings = await authFetch(`${BASE_URL}/api/settings/mail`);
   const dataSettings = await resSettings.json();
   console.log("Settings config:", dataSettings.config);
   assert(dataSettings.success === true, "Mail settings retrieved");
@@ -156,21 +198,21 @@ async function runTest() {
 
   // TEST 10: Test SMTP endpoint
   console.log("\n--- TEST 10: Testing SMTP Server Check Endpoint ---");
-  const resTestSmtp = await fetch(`${BASE_URL}/api/settings/test-smtp`, { method: "POST" });
+  const resTestSmtp = await authFetch(`${BASE_URL}/api/settings/test-smtp`, { method: "POST" });
   const dataTestSmtp = await resTestSmtp.json();
   console.log("SMTP Test result:", dataTestSmtp);
   assert(typeof dataTestSmtp.success === "boolean", "SMTP test endpoint responded with status");
 
   // TEST 11: Test IMAP endpoint
   console.log("\n--- TEST 11: Testing IMAP Server Check Endpoint ---");
-  const resTestImap = await fetch(`${BASE_URL}/api/settings/test-imap`, { method: "POST" });
+  const resTestImap = await authFetch(`${BASE_URL}/api/settings/test-imap`, { method: "POST" });
   const dataTestImap = await resTestImap.json();
   console.log("IMAP Test result:", dataTestImap);
   assert(typeof dataTestImap.success === "boolean", "IMAP test endpoint responded with status");
 
   // TEST 12: Poll Inbox endpoint
   console.log("\n--- TEST 12: Testing IMAP Poll Inbox Endpoint ---");
-  const resPoll = await fetch(`${BASE_URL}/api/inbox/poll`, { method: "POST" });
+  const resPoll = await authFetch(`${BASE_URL}/api/inbox/poll`, { method: "POST" });
   const dataPoll = await resPoll.json();
   console.log("Inbox Poll result:", dataPoll);
   assert(typeof dataPoll.success === "boolean", "Inbox poll endpoint responded with status");

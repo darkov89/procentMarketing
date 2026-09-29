@@ -6,9 +6,35 @@ async function runScaleActivityTest() {
   console.log("🧪 TESTING ENTERPRISE SCALE & GROUNDED ACTIVITY FLOW");
   console.log("==================================================");
 
+  // 0. Authenticate
+  const authEmail = `scale_tester_${Date.now()}@procentmarketing.pl`;
+  const resAuth = await fetch(`${BASE_URL}/api/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      inviteCode: "PROCENT-START-2026",
+      email: authEmail,
+      password: "TestPassword123!",
+      name: "Scale Tester",
+    }),
+  });
+  const rawCookie = resAuth.headers.get("set-cookie") || "";
+  const cookieMatch = rawCookie.match(/pm_session_token=([^;]+)/);
+  const sessionToken = cookieMatch ? cookieMatch[1] : "";
+  const cookieHeader = `pm_session_token=${sessionToken}`;
+
+  const originalFetch = fetch;
+  const authFetch = (url, options = {}) => {
+    const headers = { ...options.headers };
+    if (!headers.Cookie && !headers.cookie) {
+      headers.Cookie = cookieHeader;
+    }
+    return originalFetch(url, { ...options, headers });
+  };
+
   // 1. Test Scraper with companyScale: "mikro" (CEIDG / JDG)
   console.log("\n1. Testing Scraper for Mikroprzedsiębiorstwa (CEIDG)...");
-  const resMikro = await fetch(`${BASE_URL}/api/scraper`, {
+  const resMikro = await authFetch(`${BASE_URL}/api/scraper`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -31,7 +57,7 @@ async function runScaleActivityTest() {
 
   // 2. Test Scraper with companyScale: "male" (KRS / Sp. z o.o.)
   console.log("\n2. Testing Scraper for Małe Przedsiębiorstwa (KRS)...");
-  const resMale = await fetch(`${BASE_URL}/api/scraper`, {
+  const resMale = await authFetch(`${BASE_URL}/api/scraper`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -54,7 +80,7 @@ async function runScaleActivityTest() {
 
   // 3. Verify lead in DB has companyScale and businessActivity
   console.log("\n3. Verifying Lead Data in Database...");
-  const resLeads = await fetch(`${BASE_URL}/api/leads`);
+  const resLeads = await authFetch(`${BASE_URL}/api/leads`);
   const dataLeads = await resLeads.json();
   const leadsWithScale = dataLeads.leads.filter((l) => l.scoreBreakdown?.companyScale);
   console.log(`Found ${leadsWithScale.length} leads with companyScale in scoreBreakdown.`);
@@ -72,7 +98,7 @@ async function runScaleActivityTest() {
 
   // 4. Test Grounded Offer Generation for this Lead
   console.log(`\n4. Testing Grounded Offer Generation for Lead #${sampleLead.id}...`);
-  const resOffer = await fetch(`${BASE_URL}/api/offers/${sampleLead.id}`, { method: "POST" });
+  const resOffer = await authFetch(`${BASE_URL}/api/offers/${sampleLead.id}`, { method: "POST" });
   const dataOffer = await resOffer.json();
   console.log("Generated Offer:", {
     success: dataOffer.success,
@@ -88,7 +114,7 @@ async function runScaleActivityTest() {
 
   // 5. Test Full Pipeline Orchestration with newly audited activity
   console.log("\n5. Testing Autonomous Pipeline Execution...");
-  const resPipeline = await fetch(`${BASE_URL}/api/pipeline`, { method: "POST" });
+  const resPipeline = await authFetch(`${BASE_URL}/api/pipeline`, { method: "POST" });
   const dataPipeline = await resPipeline.json();
   console.log("Pipeline Report:", dataPipeline.report);
 
