@@ -120,32 +120,7 @@ export function qualifyLead(
     }
   }
 
-  // 2. HARD RULE: Wrocław exclusion
-  if (
-    combined.includes("wroc") ||
-    (lead.city || "").toLowerCase().includes("wroc")
-  ) {
-    return {
-      decision: LeadDecision.AUTO_DISQUALIFIED,
-      totalScore: 0,
-      suggestedStatus: "disqualified",
-      rejectionReason: "Bezwzględne wykluczenie miasta Wrocław (zero tolerance)",
-      reviewReason: null,
-      breakdown: {
-        industryMatchScore: 0,
-        automationNeedScore: 0,
-        paymentAbilityScore: 0,
-        reachabilityScore: 0,
-        otherSignalsScore: 0,
-        totalScore: 0,
-        decision: LeadDecision.AUTO_DISQUALIFIED,
-        confidence: "high",
-        automationFitReasons: [],
-      },
-    };
-  }
-
-  // 3. Compute Category Scores
+  // 2. Compute Category Scores
   let industryScore = 15; // default general industry
   let isPriority = false;
   const automationReasons: string[] = [];

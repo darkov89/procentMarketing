@@ -1,6 +1,6 @@
 /**
  * Geographic validation & Haversine distance calculator.
- * Strict enforcement of AGENTS.md: Wrocław is unconditionally excluded with zero tolerance.
+ * Supports configurable target regions, cities, and custom search radius across Poland.
  */
 
 export interface GeoPoint {
@@ -11,6 +11,38 @@ export interface GeoPoint {
 export const LEGNICA_RYNEK: GeoPoint = {
   lat: 51.2070,
   lon: 16.1605,
+};
+
+export const WROCLAW_RYNEK: GeoPoint = {
+  lat: 51.1079,
+  lon: 17.0385,
+};
+
+export const KNOWN_CITIES_COORDS: Record<string, GeoPoint> = {
+  legnica: { lat: 51.2070, lon: 16.1605 },
+  wrocław: { lat: 51.1079, lon: 17.0385 },
+  wroclaw: { lat: 51.1079, lon: 17.0385 },
+  lubin: { lat: 51.3980, lon: 16.2030 },
+  jawor: { lat: 51.0505, lon: 16.1932 },
+  złotoryja: { lat: 51.1278, lon: 15.9189 },
+  zlotoryja: { lat: 51.1278, lon: 15.9189 },
+  chojnów: { lat: 51.2720, lon: 15.9360 },
+  chojnow: { lat: 51.2720, lon: 15.9360 },
+  polkowice: { lat: 51.5030, lon: 16.0680 },
+  wałbrzych: { lat: 50.7670, lon: 16.2840 },
+  walbrzych: { lat: 50.7670, lon: 16.2840 },
+  "jelenia góra": { lat: 50.9044, lon: 15.7384 },
+  "jelenia gora": { lat: 50.9044, lon: 15.7384 },
+  prochowice: { lat: 51.2250, lon: 16.3650 },
+  strzegom: { lat: 50.9600, lon: 16.3480 },
+  warszawa: { lat: 52.2297, lon: 21.0122 },
+  poznań: { lat: 52.4064, lon: 16.9252 },
+  poznan: { lat: 52.4064, lon: 16.9252 },
+  kraków: { lat: 50.0647, lon: 19.9450 },
+  krakow: { lat: 50.0647, lon: 19.9450 },
+  katowice: { lat: 50.2649, lon: 19.0238 },
+  gdańsk: { lat: 54.3520, lon: 18.6466 },
+  gdansk: { lat: 54.3520, lon: 18.6466 },
 };
 
 export const DEFAULT_RADIUS_KM = 30.0;
@@ -48,7 +80,7 @@ export function haversineDistance(
 }
 
 /**
- * Checks if a string contains any variant of Wrocław.
+ * Checks if a string contains any variant of Wrocław (kept for backwards-compatibility).
  */
 export function isWroclaw(text?: string | null): boolean {
   if (!text) return false;
@@ -62,34 +94,70 @@ export function isWroclaw(text?: string | null): boolean {
 }
 
 /**
- * Validates a lead's geographic location.
- * Wrocław is unconditionally rejected regardless of coordinates or distance.
+ * Validates a lead's geographic location against user-selected center city and radius.
+ * No hardcoded exclusions — user has full freedom of target region and cities.
  */
 export function validateGeo(params: {
   city?: string | null;
   address?: string | null;
   latitude?: number | null;
   longitude?: number | null;
-  maxRadiusKm?: number;
+  maxRadiusKm?: number | null;
+  centerCity?: string | null;
+  centerCoordinates?: GeoPoint | null;
+  excludedCities?: string[];
 }): GeoValidationResult {
-  const maxRadius = params.maxRadiusKm ?? DEFAULT_RADIUS_KM;
+  const maxRadius = params.maxRadiusKm;
 
-  // 1. HARD RULE: Zero tolerance for Wrocław in city or address
-  if (isWroclaw(params.city) || isWroclaw(params.address)) {
+  // 1. Optional user-configured excluded cities (if user explicitly blacklists any)
+  if (params.excludedCities && params.excludedCities.length > 0) {
+    const leadCityNorm = (params.city || "").toLowerCase().trim();
+    const leadAddrNorm = (params.address || "").toLowerCase().trim();
+    for (const exc of params.excludedCities) {
+      const excNorm = exc.toLowerCase().trim();
+      if (excNorm && (leadCityNorm.includes(excNorm) || leadAddrNorm.includes(excNorm))) {
+        return {
+          isAllowed: false,
+          distanceKm: null,
+          latitude: params.latitude ?? null,
+          longitude: params.longitude ?? null,
+          rejectionReason: `Miasto wykluczone w konfiguracji użytkownika: ${exc}`,
+        };
+      }
+    }
+  }
+
+  // 2. If no radius limit is set (null, 0, >= 999, or "all" / "cała polska"), allow everywhere
+  const centerCityKey = (params.centerCity || "").trim().toLowerCase();
+  if (
+    maxRadius === null ||
+    maxRadius === undefined ||
+    maxRadius <= 0 ||
+    maxRadius >= 999 ||
+    centerCityKey === "all" ||
+    centerCityKey === "wszystkie" ||
+    centerCityKey === "cała polska"
+  ) {
     return {
-      isAllowed: false,
-      distanceKm: null,
+      isAllowed: true,
+      distanceKm: 0.0,
       latitude: params.latitude ?? null,
       longitude: params.longitude ?? null,
-      rejectionReason: "Bezwzględne wykluczenie: miasto Wrocław (zero tolerance)",
+      rejectionReason: null,
     };
   }
 
-  // 2. If coordinates are provided, compute exact distance
+  // 3. Resolve Center Point
+  let center: GeoPoint = params.centerCoordinates || LEGNICA_RYNEK;
+  if (centerCityKey && KNOWN_CITIES_COORDS[centerCityKey]) {
+    center = KNOWN_CITIES_COORDS[centerCityKey];
+  }
+
+  // 4. If coordinates are provided, compute exact distance to selected center
   if (params.latitude != null && params.longitude != null) {
     const dist = haversineDistance(
-      LEGNICA_RYNEK.lat,
-      LEGNICA_RYNEK.lon,
+      center.lat,
+      center.lon,
       params.latitude,
       params.longitude
     );
@@ -100,7 +168,7 @@ export function validateGeo(params: {
         distanceKm: dist,
         latitude: params.latitude,
         longitude: params.longitude,
-        rejectionReason: `Lokalizacja poza dozwolonym promieniem (${dist.toFixed(1)} km > ${maxRadius} km od Legnicy)`,
+        rejectionReason: `Lokalizacja poza wybranym promieniem (${dist.toFixed(1)} km > ${maxRadius} km od centrum ${params.centerCity || "wybranego miasta"})`,
       };
     }
 
@@ -113,43 +181,31 @@ export function validateGeo(params: {
     };
   }
 
-  // 3. Fallback: Known allowed towns within 30km of Legnica
-  const knownAllowedTowns: Record<string, number> = {
-    legnica: 0.0,
-    lubin: 23.5,
-    jawor: 18.2,
-    złotoryja: 19.8,
-    zlotoryja: 19.8,
-    chojnów: 18.0,
-    chojnow: 18.0,
-    prochowice: 15.5,
-    strzegom: 28.5,
-    polkowice: 34.0, // outside default 30km
-  };
-
-  const cityKey = (params.city || "").trim().toLowerCase();
-  if (cityKey in knownAllowedTowns) {
-    const dist = knownAllowedTowns[cityKey];
+  // 5. Fallback: match by city name against known cities
+  const leadCityKey = (params.city || "").trim().toLowerCase();
+  if (leadCityKey in KNOWN_CITIES_COORDS) {
+    const cityCoords = KNOWN_CITIES_COORDS[leadCityKey];
+    const dist = haversineDistance(center.lat, center.lon, cityCoords.lat, cityCoords.lon);
     if (dist <= maxRadius) {
       return {
         isAllowed: true,
         distanceKm: dist,
-        latitude: null,
-        longitude: null,
+        latitude: cityCoords.lat,
+        longitude: cityCoords.lon,
         rejectionReason: null,
       };
     } else {
       return {
         isAllowed: false,
         distanceKm: dist,
-        latitude: null,
-        longitude: null,
-        rejectionReason: `Miasto ${params.city} oddalone o ${dist} km (limit: ${maxRadius} km)`,
+        latitude: cityCoords.lat,
+        longitude: cityCoords.lon,
+        rejectionReason: `Miasto ${params.city} oddalone o ${dist.toFixed(1)} km od centrum (${params.centerCity || "wybranego miasta"}), limit to ${maxRadius} km`,
       };
     }
   }
 
-  // Default: allow if city is Legnica or unspecified, flag distance as unknown
+  // Default: allow
   return {
     isAllowed: true,
     distanceKm: 0.0,

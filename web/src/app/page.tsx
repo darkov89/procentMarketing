@@ -39,6 +39,9 @@ import {
   Users,
   LogOut,
   Copy,
+  Sliders,
+  Target,
+  MapPin,
 } from "lucide-react";
 
 interface LeadItem {
@@ -137,6 +140,38 @@ export default function LeadMachineDashboard() {
   const [smtpTesting, setSmtpTesting] = useState(false);
   const [imapTesting, setImapTesting] = useState(false);
   const [csvUploading, setCsvUploading] = useState(false);
+
+  // Targeting Preferences state
+  const [targetingSettings, setTargetingSettings] = useState<{
+    targetRegion: string;
+    defaultCity: string;
+    defaultRadiusKm: number;
+    targetIndustries: string[];
+    targetCompanyScales: string[];
+    excludedKeywords: string[];
+    notes?: string;
+  }>({
+    targetRegion: "Dolnośląskie",
+    defaultCity: "Wrocław",
+    defaultRadiusKm: 35,
+    targetIndustries: [
+      "Stomatologia & Medycyna",
+      "Biura Rachunkowe & Podatki",
+      "Kancelarie Prawne",
+      "Fotowoltaika & HVAC",
+      "Automatyka B2B & Przemysł",
+      "Budownictwo & Remonty",
+      "Transport & Spedycja",
+      "Serwis Samochodowy & Warsztaty",
+      "Usługi IT & Nowe Technologie",
+    ],
+    targetCompanyScales: ["mikro", "male", "msp"],
+    excludedKeywords: [],
+    notes: "",
+  });
+  const [targetingLoading, setTargetingLoading] = useState(false);
+  const [newIndustryTag, setNewIndustryTag] = useState("");
+  const [newExcludedKeyword, setNewExcludedKeyword] = useState("");
 
   // Outreach & Follow-up Drawer State
   const [outreachData, setOutreachData] = useState<{
@@ -293,6 +328,7 @@ export default function LeadMachineDashboard() {
   useEffect(() => {
     fetchLeads();
     fetchCurrentUser();
+    fetchSettings();
   }, []);
 
   useEffect(() => {
@@ -673,9 +709,25 @@ export default function LeadMachineDashboard() {
       radius: 30,
       desc: "Generalni wykonawcy i firmy budowlano-remontowe",
     },
+    {
+      icon: "🏢",
+      title: "Wrocław & Aglomeracja: Kancelarie & B2B",
+      keyword: "Kancelaria B2B",
+      city: "Wrocław",
+      radius: 35,
+      desc: "Kancelarie prawne, podatkowe i doradztwo biznesowe (Wrocław)",
+    },
+    {
+      icon: "💻",
+      title: "Wrocław: IT & Nowe Technologie",
+      keyword: "Software IT",
+      city: "Wrocław",
+      radius: 25,
+      desc: "Software house'y, agencje digital i integracje B2B we Wrocławiu",
+    },
   ];
 
-  // Fetch mail settings
+  // Fetch mail and targeting settings
   const fetchSettings = async () => {
     try {
       const res = await fetch("/api/settings/mail");
@@ -684,6 +736,51 @@ export default function LeadMachineDashboard() {
         setMailSettings((prev) => ({ ...prev, ...data.config }));
       }
     } catch {}
+
+    try {
+      const resTargeting = await fetch("/api/settings/targeting");
+      const dataTargeting = await resTargeting.json();
+      if (dataTargeting.success && dataTargeting.preferences) {
+        setTargetingSettings(dataTargeting.preferences);
+        if (dataTargeting.preferences.defaultCity) {
+          setScraperCity(dataTargeting.preferences.defaultCity);
+        }
+        if (dataTargeting.preferences.defaultRadiusKm !== undefined) {
+          setScraperRadius(dataTargeting.preferences.defaultRadiusKm);
+        }
+        if (dataTargeting.preferences.targetCompanyScales?.length > 0) {
+          const firstScale = dataTargeting.preferences.targetCompanyScales[0];
+          if (firstScale === "mikro" || firstScale === "male" || firstScale === "msp") {
+            setScraperCompanyScale(firstScale);
+          }
+        }
+      }
+    } catch {}
+  };
+
+  // Handle Save Targeting Settings
+  const handleSaveTargetingSettings = async () => {
+    setTargetingLoading(true);
+    showToast("Zapisywanie preferencji targetowania...", "info");
+    try {
+      const res = await fetch("/api/settings/targeting", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(targetingSettings),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast("Zapisano preferencje targetowania!", "success");
+        setScraperCity(targetingSettings.defaultCity);
+        setScraperRadius(targetingSettings.defaultRadiusKm);
+      } else {
+        showToast(data.error || "Błąd zapisu preferencji", "error");
+      }
+    } catch {
+      showToast("Błąd zapisu preferencji", "error");
+    } finally {
+      setTargetingLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -1600,44 +1697,78 @@ export default function LeadMachineDashboard() {
                     onChange={(e) => setScraperCity(e.target.value)}
                     className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   >
+                    <option value="Wrocław">Wrocław (Rynek & Aglomeracja)</option>
                     <option value="Legnica">Legnica (Rynek)</option>
                     <option value="Lubin">Lubin</option>
                     <option value="Jawor">Jawor</option>
                     <option value="Złotoryja">Złotoryja</option>
                     <option value="Chojnów">Chojnów</option>
                     <option value="Polkowice">Polkowice</option>
+                    <option value="Wałbrzych">Wałbrzych</option>
+                    <option value="Jelenia Góra">Jelenia Góra</option>
+                    <option value="Warszawa">Warszawa</option>
+                    <option value="Poznań">Poznań</option>
+                    <option value="Cała Polska">Cała Polska (Dowolna lokalizacja)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
-                    Maksymalny promień (km)
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
+                      Maksymalny promień
+                    </label>
+                    <span className="font-extrabold text-xs text-[#FFE600]">
+                      {scraperRadius > 0 ? `${scraperRadius} km` : "Bez limitu"}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-3">
                     <input
                       type="range"
-                      min={5}
-                      max={45}
+                      min={0}
+                      max={100}
                       step={5}
                       value={scraperRadius}
                       onChange={(e) => setScraperRadius(parseInt(e.target.value, 10))}
                       className="flex-1 accent-[#FFE600]"
                     />
-                    <span className="font-extrabold text-sm text-[#FFE600] w-12">{scraperRadius} km</span>
+                    <button
+                      type="button"
+                      onClick={() => setScraperRadius(scraperRadius === 0 ? 35 : 0)}
+                      className={`text-[10px] font-bold px-2 py-1 rounded border transition-all ${
+                        scraperRadius === 0
+                          ? "bg-[#FFE600] text-black border-[#FFE600]"
+                          : "bg-[#0A0E17] text-[#94A3B8] border-[#28354D]"
+                      }`}
+                    >
+                      {scraperRadius === 0 ? "Bez limitu" : "Cała PL"}
+                    </button>
                   </div>
                 </div>
               </div>
 
-              {/* Strict Rule Notice */}
-              <div className="mt-5 p-3.5 bg-[#881337]/30 border border-[#E11D48]/50 rounded-xl flex items-center justify-between text-xs text-[#FB7185]">
+              {/* Configurable Targeting Notice */}
+              <div className="mt-5 p-3.5 bg-[#1E293B]/70 border border-[#38BDF8]/30 rounded-xl flex items-center justify-between text-xs text-[#38BDF8]">
                 <div className="flex items-center gap-2">
-                  <ShieldCheck size={16} />
+                  <Target size={16} />
                   <span>
-                    <strong>Twarda reguła bezpieczeństwa:</strong> Wyniki z Wrocławia zostaną bezwzględnie zablokowane i
-                    odrzucone na poziomie algorytmu.
+                    <strong>Aktywne kryteria:</strong> Miasto: <strong>{scraperCity}</strong> (
+                    {scraperRadius > 0 ? `promień ≤${scraperRadius} km` : "dowolny promień / Cała Polska"}), wielkość:{" "}
+                    <strong>
+                      {scraperCompanyScale === "mikro"
+                        ? "Mikro (CEIDG / JDG)"
+                        : scraperCompanyScale === "male"
+                        ? "Małe (KRS / Sp. z o.o.)"
+                        : "Całe MŚP"}
+                    </strong>.
                   </span>
                 </div>
-                <span className="bg-[#E11D48] text-white px-2 py-0.5 rounded font-black text-[10px]">ZERO TOLERANCE</span>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("settings")}
+                  className="bg-[#38BDF8]/20 hover:bg-[#38BDF8]/30 text-[#38BDF8] px-2.5 py-1 rounded font-bold text-[11px] transition-all flex items-center gap-1"
+                >
+                  <Sliders size={12} /> Zmień w Ustawieniach
+                </button>
               </div>
 
               <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
@@ -1722,9 +1853,9 @@ export default function LeadMachineDashboard() {
                     <span className="text-xs text-[#34D399]">Dodano do bazy</span>
                     <div className="text-xl font-black text-[#34D399]">+{scraperResult.added}</div>
                   </div>
-                  <div className="bg-[#0A0E17] p-3 rounded-lg border border-[#E11D48]">
-                    <span className="text-xs text-[#FB7185]">Odrzucono Wrocław</span>
-                    <div className="text-xl font-black text-[#FB7185]">{scraperResult.rejectedWroclaw}</div>
+                  <div className="bg-[#0A0E17] p-3 rounded-lg border border-[#28354D]">
+                    <span className="text-xs text-[#94A3B8]">Poza promieniem</span>
+                    <div className="text-xl font-black text-white">{scraperResult.rejectedRadius || 0}</div>
                   </div>
                   <div className="bg-[#0A0E17] p-3 rounded-lg border border-[#28354D]">
                     <span className="text-xs text-[#94A3B8]">Duplikaty pominięte</span>
@@ -1874,6 +2005,335 @@ export default function LeadMachineDashboard() {
                     <p className="text-sm font-extrabold text-[#C084FC] mt-0.5">POSTGRESQL FRANKFURT</p>
                   </div>
                   <span className="badge badge-approved">POŁĄCZONO</span>
+                </div>
+              </div>
+            </div>
+
+            {/* TARGETING & LEAD PREFERENCES FORM */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-6">
+              <div className="flex flex-wrap items-center justify-between border-b border-[#28354D] pb-4 gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-[#FFE600] text-black rounded-xl font-bold">
+                    <Target size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-extrabold text-white">
+                      Kryteria Targetowania & Preferencje Rynku B2B
+                    </h3>
+                    <p className="text-xs text-[#94A3B8]">
+                      Wybierz interesujący Cię region, miasto, wielkość firm oraz branże docelowe. Ustawienia te stanowią domyślny profil poszukiwań.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveTargetingSettings}
+                  disabled={targetingLoading}
+                  className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50"
+                >
+                  <Save size={16} />
+                  {targetingLoading ? "Zapisywanie..." : "Zapisz Kryteria Targetowania"}
+                </button>
+              </div>
+
+              {/* 1. Region, Centrum i Promień */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600] flex items-center gap-1.5">
+                  <MapPin size={14} /> 1. Region Geograficzny & Centrum Poszukiwań
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                      Województwo / Obszar
+                    </label>
+                    <select
+                      value={targetingSettings.targetRegion}
+                      onChange={(e) =>
+                        setTargetingSettings({ ...targetingSettings, targetRegion: e.target.value })
+                      }
+                      className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    >
+                      <option value="Dolnośląskie">Dolnośląskie (Wrocław, Legnica, Lubin)</option>
+                      <option value="Wrocław i Aglomeracja">Wrocław i Aglomeracja Wrocławska</option>
+                      <option value="Zagłębie Miedziowe">Zagłębie Miedziowe (Legnica, Lubin, Polkowice)</option>
+                      <option value="Mazowieckie">Mazowieckie (Warszawa)</option>
+                      <option value="Wielkopolskie">Wielkopolskie (Poznań)</option>
+                      <option value="Śląskie">Śląskie (Katowice, GOP)</option>
+                      <option value="Małopolskie">Małopolskie (Kraków)</option>
+                      <option value="Pomorskie">Pomorskie (Gdańsk / Trójmiasto)</option>
+                      <option value="Cała Polska">Cała Polska (Bez ograniczeń)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                      Domyślne Miasto Centrum
+                    </label>
+                    <input
+                      type="text"
+                      value={targetingSettings.defaultCity}
+                      onChange={(e) =>
+                        setTargetingSettings({ ...targetingSettings, defaultCity: e.target.value })
+                      }
+                      placeholder="np. Wrocław, Legnica, Lubin, Warszawa..."
+                      className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-[#94A3B8]">Domyślny Promień (km)</label>
+                      <span className="font-extrabold text-xs text-[#FFE600]">
+                        {targetingSettings.defaultRadiusKm > 0 ? `${targetingSettings.defaultRadiusKm} km` : "Bez limitu"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={targetingSettings.defaultRadiusKm}
+                        onChange={(e) =>
+                          setTargetingSettings({
+                            ...targetingSettings,
+                            defaultRadiusKm: parseInt(e.target.value, 10),
+                          })
+                        }
+                        className="flex-1 accent-[#FFE600]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setTargetingSettings({
+                            ...targetingSettings,
+                            defaultRadiusKm: targetingSettings.defaultRadiusKm === 0 ? 35 : 0,
+                          })
+                        }
+                        className={`text-[10px] font-bold px-2 py-1 rounded border transition-all ${
+                          targetingSettings.defaultRadiusKm === 0
+                            ? "bg-[#FFE600] text-black border-[#FFE600]"
+                            : "bg-[#0A0E17] text-[#94A3B8] border-[#28354D]"
+                        }`}
+                      >
+                        {targetingSettings.defaultRadiusKm === 0 ? "Bez limitu km" : "Cała PL"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Wielkość Przedsiębiorstw */}
+              <div className="space-y-3 pt-2 border-t border-[#28354D]">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600] flex items-center gap-1.5">
+                  <Building size={14} /> 2. Preferowane Wielkości Przedsiębiorstw (Segmenty Rynku)
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div
+                    onClick={() => {
+                      const scales = targetingSettings.targetCompanyScales.includes("mikro")
+                        ? targetingSettings.targetCompanyScales.filter((s) => s !== "mikro")
+                        : [...targetingSettings.targetCompanyScales, "mikro"];
+                      setTargetingSettings({ ...targetingSettings, targetCompanyScales: scales });
+                    }}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      targetingSettings.targetCompanyScales.includes("mikro")
+                        ? "bg-[#1E293B] border-[#FFE600] text-white"
+                        : "bg-[#0A0E17] border-[#28354D] text-[#94A3B8] opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-bold text-xs mb-1">
+                      <span>🏢 Mikroprzedsiębiorstwa</span>
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300">
+                        CEIDG / JDG
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#94A3B8]">
+                      Jednoosobowe działalności, gabinety, kancelarie, wykonawcy (1–9 osób).
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => {
+                      const scales = targetingSettings.targetCompanyScales.includes("male")
+                        ? targetingSettings.targetCompanyScales.filter((s) => s !== "male")
+                        : [...targetingSettings.targetCompanyScales, "male"];
+                      setTargetingSettings({ ...targetingSettings, targetCompanyScales: scales });
+                    }}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      targetingSettings.targetCompanyScales.includes("male")
+                        ? "bg-[#1E293B] border-[#FFE600] text-white"
+                        : "bg-[#0A0E17] border-[#28354D] text-[#94A3B8] opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-bold text-xs mb-1">
+                      <span>🏭 Małe Przedsiębiorstwa</span>
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-blue-950 text-blue-300">
+                        KRS / Sp. z o.o.
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#94A3B8]">
+                      Spółki z o.o., jawne, komandytowe, producenci i hurtownie (10–49 osób).
+                    </p>
+                  </div>
+
+                  <div
+                    onClick={() => {
+                      const scales = targetingSettings.targetCompanyScales.includes("msp")
+                        ? targetingSettings.targetCompanyScales.filter((s) => s !== "msp")
+                        : [...targetingSettings.targetCompanyScales, "msp"];
+                      setTargetingSettings({ ...targetingSettings, targetCompanyScales: scales });
+                    }}
+                    className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                      targetingSettings.targetCompanyScales.includes("msp")
+                        ? "bg-[#1E293B] border-[#FFE600] text-white"
+                        : "bg-[#0A0E17] border-[#28354D] text-[#94A3B8] opacity-60"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-bold text-xs mb-1">
+                      <span>🌐 Pełny Sektor MŚP</span>
+                      <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-purple-950 text-purple-300">
+                        Mikro + Małe + Średnie
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#94A3B8]">
+                      Pełen przekrój rynku bez ograniczeń formy prawnej.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3. Preferowane Branże & Nisze */}
+              <div className="space-y-3 pt-2 border-t border-[#28354D]">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600] flex items-center gap-1.5">
+                    <Sliders size={14} /> 3. Branże Docelowe (Profile & Nisze)
+                  </h4>
+                  <span className="text-[11px] text-[#94A3B8]">
+                    Kliknij tag, aby usunąć lub dodaj własny
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {targetingSettings.targetIndustries.map((ind, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#0A0E17] border border-[#28354D] text-xs font-bold text-white hover:border-[#FFE600] transition-all"
+                    >
+                      {ind}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = targetingSettings.targetIndustries.filter((_, i) => i !== idx);
+                          setTargetingSettings({ ...targetingSettings, targetIndustries: updated });
+                        }}
+                        className="text-[#94A3B8] hover:text-[#FB7185] ml-1"
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="text"
+                    value={newIndustryTag}
+                    onChange={(e) => setNewIndustryTag(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newIndustryTag.trim()) {
+                        e.preventDefault();
+                        if (!targetingSettings.targetIndustries.includes(newIndustryTag.trim())) {
+                          setTargetingSettings({
+                            ...targetingSettings,
+                            targetIndustries: [...targetingSettings.targetIndustries, newIndustryTag.trim()],
+                          });
+                        }
+                        setNewIndustryTag("");
+                      }
+                    }}
+                    placeholder="Wpisz nową branżę (np. Architekci, Geodezja, Ochrona) i naciśnij Enter..."
+                    className="flex-1 bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newIndustryTag.trim() && !targetingSettings.targetIndustries.includes(newIndustryTag.trim())) {
+                        setTargetingSettings({
+                          ...targetingSettings,
+                          targetIndustries: [...targetingSettings.targetIndustries, newIndustryTag.trim()],
+                        });
+                        setNewIndustryTag("");
+                      }
+                    }}
+                    className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-xs px-3.5 py-2 rounded-lg flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Dodaj branżę
+                  </button>
+                </div>
+              </div>
+
+              {/* 4. Opcjonalna Blacklista Wykluczeń */}
+              <div className="space-y-3 pt-2 border-t border-[#28354D]">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-[#94A3B8] flex items-center gap-1.5">
+                  <XCircle size={14} className="text-[#FB7185]" /> 4. Opcjonalne Wykluczenia (Twoja Własna Czarna Lista)
+                </h4>
+                <p className="text-xs text-[#94A3B8]">
+                  Wpisz słowa lub miasta, które chcesz wykluczyć (np. &quot;sieciówki&quot;, &quot;franczyza&quot;, &quot;korporacja&quot;). Brak sztywnego blokowania — decydujesz Ty.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {targetingSettings.excludedKeywords?.map((exc, idx) => (
+                    <span
+                      key={idx}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#881337]/20 border border-[#E11D48]/40 text-xs text-[#FB7185] font-semibold"
+                    >
+                      {exc}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = targetingSettings.excludedKeywords.filter((_, i) => i !== idx);
+                          setTargetingSettings({ ...targetingSettings, excludedKeywords: updated });
+                        }}
+                        className="hover:text-white"
+                      >
+                        <X size={12} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newExcludedKeyword}
+                    onChange={(e) => setNewExcludedKeyword(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newExcludedKeyword.trim()) {
+                        e.preventDefault();
+                        setTargetingSettings({
+                          ...targetingSettings,
+                          excludedKeywords: [...(targetingSettings.excludedKeywords || []), newExcludedKeyword.trim()],
+                        });
+                        setNewExcludedKeyword("");
+                      }
+                    }}
+                    placeholder="Wpisz słowo do wykluczenia i naciśnij Enter..."
+                    className="flex-1 bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newExcludedKeyword.trim()) {
+                        setTargetingSettings({
+                          ...targetingSettings,
+                          excludedKeywords: [...(targetingSettings.excludedKeywords || []), newExcludedKeyword.trim()],
+                        });
+                        setNewExcludedKeyword("");
+                      }
+                    }}
+                    className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-xs px-3.5 py-2 rounded-lg flex items-center gap-1"
+                  >
+                    <Plus size={14} /> Wyklucz
+                  </button>
                 </div>
               </div>
             </div>

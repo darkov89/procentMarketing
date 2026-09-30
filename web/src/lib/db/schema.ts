@@ -189,6 +189,13 @@ export const sessions = pgTable("sessions", {
   createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
 });
 
+export const appSettings = pgTable("app_settings", {
+  id: serial("id").primaryKey(),
+  key: varchar("key", { length: 100 }).unique().notNull(),
+  value: json("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
 // Relations
 export const leadsRelations = relations(leads, ({ one, many }) => ({
   audit: one(audits, {

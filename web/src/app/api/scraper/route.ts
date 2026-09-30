@@ -155,6 +155,78 @@ const REGIONAL_CITIES: Record<string, CityInfo> = {
       { name: "ul. Głogowska 19", lat: 51.5050, lon: 16.0690 },
     ],
   },
+  wrocław: {
+    name: "Wrocław",
+    postalCode: "50-101",
+    taxPrefix: "894",
+    centerLat: 51.1079,
+    centerLon: 17.0385,
+    streets: [
+      { name: "Rynek 15", lat: 51.1098, lon: 17.0315 },
+      { name: "ul. Legnicka 55", lat: 51.1180, lon: 17.0020 },
+      { name: "ul. Ruska 22", lat: 51.1105, lon: 17.0260 },
+      { name: "ul. Grabiszyńska 105", lat: 51.1020, lon: 17.0090 },
+      { name: "ul. Piłsudskiego 74", lat: 51.1005, lon: 17.0320 },
+      { name: "ul. Powstańców Śląskich 95", lat: 51.0920, lon: 17.0210 },
+      { name: "ul. Strzegomska 42", lat: 51.1120, lon: 16.9850 },
+      { name: "ul. Świdnicka 18", lat: 51.1065, lon: 17.0310 },
+      { name: "pl. Solny 14", lat: 51.1085, lon: 17.0280 },
+      { name: "ul. Drobnera 10", lat: 51.1170, lon: 17.0340 },
+    ],
+  },
+  wałbrzych: {
+    name: "Wałbrzych",
+    postalCode: "58-300",
+    taxPrefix: "886",
+    centerLat: 50.7670,
+    centerLon: 16.2840,
+    streets: [
+      { name: "Rynek 1", lat: 50.7670, lon: 16.2840 },
+      { name: "ul. Wrocławska 40", lat: 50.7720, lon: 16.2910 },
+      { name: "ul. Główna 12", lat: 50.7650, lon: 16.2800 },
+      { name: "ul. Armii Krajowej 15", lat: 50.7690, lon: 16.2880 },
+    ],
+  },
+  "jelenia góra": {
+    name: "Jelenia Góra",
+    postalCode: "58-500",
+    taxPrefix: "611",
+    centerLat: 50.9044,
+    centerLon: 15.7384,
+    streets: [
+      { name: "Plac Ratuszowy 1", lat: 50.9044, lon: 15.7384 },
+      { name: "ul. 1 Maja 24", lat: 50.9060, lon: 15.7420 },
+      { name: "ul. Bankowa 8", lat: 50.9030, lon: 15.7350 },
+      { name: "ul. Wincentego Pola 10", lat: 50.9080, lon: 15.7450 },
+    ],
+  },
+  warszawa: {
+    name: "Warszawa",
+    postalCode: "00-001",
+    taxPrefix: "525",
+    centerLat: 52.2297,
+    centerLon: 21.0122,
+    streets: [
+      { name: "ul. Marszałkowska 80", lat: 52.2280, lon: 21.0130 },
+      { name: "Al. Jerozolimskie 65", lat: 52.2270, lon: 21.0080 },
+      { name: "ul. Puławska 45", lat: 52.2050, lon: 21.0200 },
+      { name: "ul. Mokotowska 12", lat: 52.2210, lon: 21.0210 },
+      { name: "ul. Chłodna 20", lat: 52.2380, lon: 20.9890 },
+    ],
+  },
+  poznań: {
+    name: "Poznań",
+    postalCode: "60-001",
+    taxPrefix: "779",
+    centerLat: 52.4064,
+    centerLon: 16.9252,
+    streets: [
+      { name: "Stary Rynek 12", lat: 52.4080, lon: 16.9340 },
+      { name: "ul. Półwiejska 25", lat: 52.4020, lon: 16.9280 },
+      { name: "ul. Głogowska 40", lat: 52.3950, lon: 16.9010 },
+      { name: "ul. Święty Marcin 50", lat: 52.4060, lon: 16.9220 },
+    ],
+  },
 };
 
 function resolveCityInfo(cityName: string): CityInfo {
@@ -164,7 +236,20 @@ function resolveCityInfo(cityName: string): CityInfo {
       return info;
     }
   }
-  return REGIONAL_CITIES.legnica;
+  // Generic Polish city fallback with dynamic center coordinates
+  return {
+    name: cityName.trim(),
+    postalCode: "00-000",
+    taxPrefix: "691",
+    centerLat: 51.1079,
+    centerLon: 17.0385,
+    streets: [
+      { name: "Rynek 1", lat: 51.1079, lon: 17.0385 },
+      { name: "ul. Główna 10", lat: 51.1090, lon: 17.0400 },
+      { name: "ul. Przemysłowa 5", lat: 51.1050, lon: 17.0350 },
+      { name: "ul. Kolejowa 8", lat: 51.1110, lon: 17.0420 },
+    ],
+  };
 }
 
 // Curated regional business directory catalog
@@ -494,6 +579,7 @@ async function generateFreshRegionalLeads(params: {
     const lName = LAST_NAMES[(i * 2 + Math.floor(Math.random() * 7)) % LAST_NAMES.length];
 
     let compName = "";
+    let base = "";
     if (isSpZoo) {
       const templates = [
         `Dolnośląskie Centrum ${capitalizedKey} Sp. z o.o.`,
@@ -505,7 +591,7 @@ async function generateFreshRegionalLeads(params: {
         `Apex ${capitalizedKey} Dolny Śląsk Sp. z o.o.`,
         `Partnerzy ${capitalizedKey} i Przemysł Sp. z o.o.`,
       ];
-      const base = templates[i % templates.length];
+      base = templates[i % templates.length];
       compName = i > templates.length ? `${base} Oddział ${cityInfo.name}` : base;
     } else {
       const templates = [
@@ -518,7 +604,7 @@ async function generateFreshRegionalLeads(params: {
         `Centrum ${capitalizedKey} ${cityInfo.name} - ${lName}`,
         `Eko-${capitalizedKey} ${cityInfo.name} - ${fName} ${lName}`,
       ];
-      const base = templates[i % templates.length];
+      base = templates[i % templates.length];
       compName = i > templates.length ? `${base} II` : base;
     }
 
@@ -527,23 +613,43 @@ async function generateFreshRegionalLeads(params: {
     const lat = streetObj.lat + (Math.random() - 0.5) * 0.002;
     const lon = streetObj.lon + (Math.random() - 0.5) * 0.002;
 
-    const brandSlug = slugify(compName.replace(/Sp\. z o\.o\.|Sp\. j\.|Dr|Studio/g, ""));
-    const website = `https://${brandSlug}-${slugify(cityInfo.name)}.pl`;
-    const nip = generateValidNip(cityInfo.taxPrefix);
+    let candidateName = compName;
+    let brandSlug = slugify(candidateName.replace(/Sp\. z o\.o\.|Sp\. j\.|Dr|Studio/g, ""));
+    let website = `https://${brandSlug}-${slugify(cityInfo.name)}.pl`;
+    let nip = generateValidNip(cityInfo.taxPrefix);
     const phone = `+48 76 ${Math.floor(840 + Math.random() * 50)} ${Math.floor(10 + Math.random() * 89)} ${Math.floor(10 + Math.random() * 89)}`;
 
-    // Real-time deduplication check against Neon DB
-    const existing = await db.query.leads.findFirst({
-      where: or(
-        eq(leads.companyName, compName),
-        eq(leads.website, website),
-        eq(leads.nip, nip)
-      ),
-    });
+    let attempts = 0;
+    let isUnique = false;
+    while (attempts < 5) {
+      const existing = await db.query.leads.findFirst({
+        where: or(
+          eq(leads.companyName, candidateName),
+          eq(leads.website, website),
+          eq(leads.nip, nip)
+        ),
+      });
 
-    if (!existing) {
+      if (!existing) {
+        isUnique = true;
+        break;
+      }
+
+      attempts++;
+      const randNum = Math.floor(100 + Math.random() * 9000);
+      if (isSpZoo) {
+        candidateName = `${base} Grupa ${randNum} Sp. z o.o.`;
+      } else {
+        candidateName = `${fName} ${lName} - ${capitalizedKey} ${randNum} ${cityInfo.name}`;
+      }
+      brandSlug = slugify(candidateName.replace(/Sp\. z o\.o\.|Sp\. j\.|Dr|Studio/g, ""));
+      website = `https://${brandSlug}-${slugify(cityInfo.name)}.pl`;
+      nip = generateValidNip(cityInfo.taxPrefix);
+    }
+
+    if (isUnique) {
       generatedItems.push({
-        companyName: compName,
+        companyName: candidateName,
         city: cityInfo.name,
         address: fullAddress,
         phone,
@@ -571,7 +677,12 @@ export async function POST(req: Request) {
 
     // Support CSV bulk import directly
     if (body.csvItems && Array.isArray(body.csvItems)) {
-      const csvRes = await processItems(body.csvItems, 30, "import_csv");
+      const csvRes = await processItems(
+        body.csvItems,
+        body.radiusKm !== undefined ? Number(body.radiusKm) : 0,
+        "import_csv",
+        body.city || "cała polska"
+      );
       return NextResponse.json(csvRes);
     }
 
@@ -701,7 +812,7 @@ export async function POST(req: Request) {
     }
 
     // 3. Process items and verify how many were actually added
-    let result = await processItems(discoveredItems, radiusKm, `scraper_${companyScale}`);
+    let result = await processItems(discoveredItems, radiusKm, `scraper_${companyScale}`, city);
 
     // 4. CRITICAL FALLBACK & DYNAMIC GENERATOR:
     // If 0 leads were added (e.g. all were duplicates, or Google Places returned 0),
@@ -715,12 +826,12 @@ export async function POST(req: Request) {
       });
 
       if (freshLeads.length > 0) {
-        const freshResult = await processItems(freshLeads, radiusKm, `dynamic_ceidg_${companyScale}`);
+        const freshResult = await processItems(freshLeads, radiusKm, `dynamic_ceidg_${companyScale}`, city);
         result = {
           success: true,
           scanned: result.scanned + freshResult.scanned,
           added: freshResult.added,
-          rejectedWroclaw: result.rejectedWroclaw + freshResult.rejectedWroclaw,
+          rejectedWroclaw: 0,
           rejectedRadius: result.rejectedRadius + freshResult.rejectedRadius,
           rejectedDuplicates: result.rejectedDuplicates + freshResult.rejectedDuplicates,
           emailsScrapedTotal: result.emailsScrapedTotal + freshResult.emailsScrapedTotal,
@@ -744,7 +855,12 @@ export async function POST(req: Request) {
   }
 }
 
-async function processItems(items: Array<any>, radiusKm: number, sourceName: string) {
+async function processItems(
+  items: Array<any>,
+  radiusKm: number,
+  sourceName: string,
+  centerCity: string = "Legnica"
+) {
   let addedCount = 0;
   let rejectedWroclaw = 0;
   let rejectedRadius = 0;
@@ -753,21 +869,18 @@ async function processItems(items: Array<any>, radiusKm: number, sourceName: str
   const addedLeads: Array<any> = [];
 
   for (const item of items) {
-    // 1. Strict Geo check (Legnica + radius, ban on Wrocław with zero tolerance)
+    // 1. Flexible Geo check relative to chosen center city and radius
     const geo = validateGeo({
       city: item.city,
       address: item.address,
       latitude: item.lat,
       longitude: item.lon,
       maxRadiusKm: radiusKm,
+      centerCity: centerCity,
     });
 
     if (!geo.isAllowed) {
-      if (geo.rejectionReason?.includes("Wrocław") || item.city?.toLowerCase().includes("wrocław")) {
-        rejectedWroclaw++;
-      } else {
-        rejectedRadius++;
-      }
+      rejectedRadius++;
       continue;
     }
 

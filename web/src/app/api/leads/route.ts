@@ -11,9 +11,8 @@ export async function GET(req: Request) {
     const city = searchParams.get("city");
     const status = searchParams.get("status");
 
-    // Fetch leads strictly excluding Wrocław, with joined audit, offer, contacts, messages
+    // Fetch all leads with joined audit, offer, contacts, messages
     const allLeads = await db.query.leads.findMany({
-      where: or(isNull(leads.city), notIlike(leads.city, "%wroc%")),
       orderBy: [desc(leads.score), desc(leads.id)],
       with: {
         audit: true,

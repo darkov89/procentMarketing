@@ -59,36 +59,37 @@ async function runTest() {
   assert(dataScraper.success === true, "Scraper returned success: true");
   assert(dataScraper.scanned > 0, "Scraper scanned regional items");
 
-  // TEST 2: Strict Wrocław Zero Tolerance Check via CSV import
-  console.log("\n--- TEST 2: Testing Strict Wrocław Zero Tolerance via CSV import ---");
+  // TEST 2: Multi-city CSV import (Wrocław and Legnica both accepted)
+  console.log("\n--- TEST 2: Testing Multi-city CSV import (Wrocław + Legnica) ---");
+  const testTs = Date.now();
   const resWroclaw = await authFetch(`${BASE_URL}/api/scraper`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       csvItems: [
         {
-          companyName: "Barber Shop Wrocław Zero Tolerance Test",
+          companyName: `Kancelaria Wrocław Centrum B2B Test ${testTs}`,
           city: "Wrocław",
           address: "ul. Świdnicka 10, Wrocław",
-          phone: "+48 71 333 44 55",
-          website: "https://barber-wroclaw-test.pl",
-          industry: "Barber",
+          phone: `+48 71 333 ${testTs % 10000}`,
+          website: `https://kancelaria-wroclaw-test-${testTs}.pl`,
+          industry: "Prawo",
         },
         {
-          companyName: "Legnica Dent Test Sp. z o.o.",
+          companyName: `Legnica Dent Test Sp. z o.o. ${testTs}`,
           city: "Legnica",
           address: "ul. Złotoryjska 55, Legnica",
-          phone: "+48 76 852 99 99",
-          website: "https://dent-legnica-test.pl",
+          phone: `+48 76 852 ${testTs % 10000}`,
+          website: `https://dent-legnica-test-${testTs}.pl`,
           industry: "Stomatologia",
-          nip: "6919998877",
+          nip: `691${String(testTs).slice(-7)}`,
         },
       ],
     }),
   });
   const dataWroclaw = await resWroclaw.json();
-  console.log("Wrocław test result:", dataWroclaw);
-  assert(dataWroclaw.rejectedWroclaw >= 1, "Wrocław business was STRICTLY REJECTED");
+  console.log("Wrocław + Legnica CSV test result:", dataWroclaw);
+  assert(dataWroclaw.added >= 1, "CSV businesses (including Wrocław) were successfully accepted and added");
 
   // TEST 3: Fetch Leads
   console.log("\n--- TEST 3: Fetching Leads from Neon Database ---");
@@ -216,6 +217,53 @@ async function runTest() {
   const dataPoll = await resPoll.json();
   console.log("Inbox Poll result:", dataPoll);
   assert(typeof dataPoll.success === "boolean", "Inbox poll endpoint responded with status");
+
+  // TEST 13: Targeting Preferences API (GET & POST)
+  console.log("\n--- TEST 13: Testing Targeting Preferences API ---");
+  const resTargetingGet = await authFetch(`${BASE_URL}/api/settings/targeting`);
+  const dataTargetingGet = await resTargetingGet.json();
+  console.log("Initial Targeting Settings:", dataTargetingGet);
+  assert(dataTargetingGet.success === true, "Targeting settings retrieved successfully");
+  const getPref = dataTargetingGet.preferences || dataTargetingGet.settings;
+  assert(Array.isArray(getPref?.targetIndustries), "Target industries is an array");
+
+  const updateTargetingPayload = {
+    targetRegion: "Dolny Śląsk",
+    defaultCity: "Wrocław",
+    defaultRadiusKm: 50,
+    targetIndustries: ["Prawo i Kancelarie", "IT i Software", "Finanse i Księgowość"],
+    targetCompanyScales: ["mikro", "male"],
+    excludedKeywords: ["hazard", "windykacja"],
+  };
+  const resTargetingPost = await authFetch(`${BASE_URL}/api/settings/targeting`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updateTargetingPayload),
+  });
+  const dataTargetingPost = await resTargetingPost.json();
+  console.log("Updated Targeting Settings:", dataTargetingPost);
+  assert(dataTargetingPost.success === true, "Targeting settings saved successfully");
+  const savedPref = dataTargetingPost.preferences || dataTargetingPost.settings;
+  assert(savedPref?.defaultCity === "Wrocław", "Target defaultCity successfully saved as Wrocław");
+  assert(savedPref?.defaultRadiusKm === 50, "Target defaultRadiusKm saved as 50km");
+
+  // TEST 14: Wrocław Generator / Scraper (No rejection, fully accepted)
+  console.log("\n--- TEST 14: Testing Wrocław Generator / Scraper ---");
+  const resWroclawScraper = await authFetch(`${BASE_URL}/api/scraper`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      keyword: "Kancelaria",
+      city: "Wrocław",
+      radiusKm: 30,
+      companyScale: "male",
+    }),
+  });
+  const dataWroclawScraper = await resWroclawScraper.json();
+  console.log("Wrocław Scraper result:", dataWroclawScraper);
+  assert(dataWroclawScraper.success === true, "Wrocław scraper succeeded");
+  assert(dataWroclawScraper.scanned > 0, "Wrocław leads scanned");
+  assert(dataWroclawScraper.added > 0, "Wrocław leads accepted and saved (not rejected)");
 
   console.log("\n==================================================");
   console.log(`🏁 TEST RESULTS: ${passedTests} / ${totalTests} TESTS PASSED!`);
