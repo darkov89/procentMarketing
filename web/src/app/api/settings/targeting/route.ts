@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, appSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
+import { requireUser } from "@/lib/auth";
 
 export interface TargetingPreferences {
   targetRegion: string;
@@ -34,6 +35,7 @@ const DEFAULT_PREFERENCES: TargetingPreferences = {
 
 export async function GET() {
   try {
+    await requireUser();
     const record = await db.query.appSettings.findFirst({
       where: eq(appSettings.key, "targeting_preferences"),
     });
@@ -53,6 +55,9 @@ export async function GET() {
       preferences: DEFAULT_PREFERENCES,
     });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     return NextResponse.json(
       { success: false, error: err?.message || String(err) },
       { status: 500 }
@@ -62,6 +67,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    await requireUser();
     const body = await req.json();
 
     const preferences: TargetingPreferences = {

@@ -46,8 +46,8 @@ class PipelineOrchestrator:
         self.netlify_deployer = NetlifyDeployer()
         self.smtp_sender = SmtpSender()
 
-    def run_full_cycle(self, session, ignore_window: bool = True) -> PipelineReport:
-        """Executes all 5 pipeline stages in strict dependency order."""
+    def run_full_cycle(self, session, ignore_window: bool = True, auto_send: bool = False) -> PipelineReport:
+        """Executes all pipeline stages. Automatically halts before outreach when approval_mode is 'all'."""
         report = PipelineReport()
 
         # Strict filter: Never process Wrocław leads, correctly handling NULL columns
@@ -253,6 +253,15 @@ class PipelineOrchestrator:
         # ----------------------------------------------------------------------
         # 5. SEND EMAIL: Outreach via SmtpSender (with full safety gate chain)
         # ----------------------------------------------------------------------
+        # AI Act Art. 14 Human Oversight: if approval_mode == "all" and not auto_send,
+        # halt automatic dispatch and leave offers ready for human review in the panel.
+        if self.settings.approval_mode == "all" and not auto_send:
+            logger.info(
+                "Stage 5 (SEND EMAIL) paused: approval_mode='all' (AI Act Human Oversight). "
+                "Offers are published and waiting for human review."
+            )
+            return report
+
         try:
             leads_for_email = (
                 session.query(Lead)

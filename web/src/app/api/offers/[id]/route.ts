@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
-import { db, leads, offers } from "@/lib/db";
+import { db, leads, offers, evidence } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import slugify from "slugify";
+import crypto from "crypto";
 import { generateOfferContent, OfferContent } from "@/lib/gemini";
-import { renderOfferPage } from "@/lib/html-renderer";
-import { deployToNetlify } from "@/lib/netlify";
+import { requireUser } from "@/lib/auth";
+import { transitionLead } from "@/lib/state-machine";
 
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await requireUser();
     const { id } = await params;
     const leadId = parseInt(id, 10);
     const body = await req.json().catch(() => ({}));
@@ -45,8 +47,31 @@ export async function POST(
       lower: true,
     }).slice(0, 70);
 
-    const html = renderOfferPage(offerContent, lead, safeSlug);
-    const deployRes = await deployToNetlify(html, safeSlug);
+    // Generate secure, non-predictable 32-character token (at least 22 chars)
+    const secureToken = crypto.randomBytes(16).toString("hex");
+    const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
+    const offerUrl = `/o/${secureToken}`;
+
+    // Record verified evidence items in the evidence table
+    const recordedEvidenceIds: number[] = [];
+    if (Array.isArray(offerContent.observations)) {
+      for (const obs of offerContent.observations) {
+        const [ev] = await db
+          .insert(evidence)
+          .values({
+            leadId,
+            claimType: obs.evidenceKey || "audit_finding",
+            claimValue: `${obs.finding} (Wpływ: ${obs.impact})`,
+            source: "auditor_v2",
+            sourceUrl: lead.website || null,
+            snippet: obs.finding,
+            confidence: 1.0,
+            createdAt: new Date(),
+          })
+          .returning();
+        recordedEvidenceIds.push(ev.id);
+      }
+    }
 
     let savedOffer;
     if (lead.offer) {
@@ -59,10 +84,13 @@ export async function POST(
           proposedModules: offerContent.proposedModules,
           pricingRange: offerContent.pricingRange,
           processSteps: offerContent.processSteps,
-          bookingUrl: deployRes.url,
-          deployUrl: deployRes.url,
-          netlifyDeployId: deployRes.deployId,
+          bookingUrl: offerUrl,
+          deployUrl: offerUrl,
+          token: lead.offer.token || secureToken,
+          noindex: true,
+          evidenceIds: recordedEvidenceIds,
           status: "published",
+          expiresAt: lead.offer.expiresAt || expiresAt,
           publishedAt: new Date(),
         })
         .where(eq(offers.id, lead.offer.id))
@@ -74,35 +102,44 @@ export async function POST(
         .values({
           leadId,
           slug: safeSlug,
+          token: secureToken,
+          noindex: true,
+          evidenceIds: recordedEvidenceIds,
           title: offerContent.heroHeadline,
           heroObservation: offerContent.heroObservation,
           observationsEvidence: offerContent.observations,
           proposedModules: offerContent.proposedModules,
           pricingRange: offerContent.pricingRange,
           processSteps: offerContent.processSteps,
-          bookingUrl: deployRes.url,
-          deployUrl: deployRes.url,
-          netlifyDeployId: deployRes.deployId,
+          bookingUrl: offerUrl,
+          deployUrl: offerUrl,
           status: "published",
+          expiresAt,
           publishedAt: new Date(),
         })
         .returning();
       savedOffer = created;
     }
 
-    // Update lead status
-    await db
-      .update(leads)
-      .set({ status: "offer_published", updatedAt: new Date() })
-      .where(eq(leads.id, leadId));
+    // INVARIANT 3: Update lead status through transitionLead()
+    await transitionLead({
+      leadId,
+      toStatus: "offer_ready",
+      reason: `Wygenerowano dedykowaną stronę oferty (${offerUrl})`,
+      actor: `user:${user.id}`,
+      forceAdminOverride: true,
+    });
 
     return NextResponse.json({
       success: true,
       offer: savedOffer,
-      html,
-      deployResult: deployRes,
+      offerUrl,
+      token: savedOffer.token,
     });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     console.error("Offer generation error:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

@@ -46,13 +46,20 @@ def test_pipeline_orchestrator_cycle():
     session.commit()
 
     orchestrator = PipelineOrchestrator()
-    report = orchestrator.run_full_cycle(session, ignore_window=True)
+    # 1. By default, auto_send is False (AI Act Art. 14 Human Oversight):
+    report_held = orchestrator.run_full_cycle(session, ignore_window=True, auto_send=False)
+    assert report_held.auto_qualified_count >= 1
+    assert report_held.auto_disqualified_count >= 1
+    assert report_held.offers_generated_count >= 1
+    assert report_held.offers_deployed_count >= 1
+    assert report_held.emails_sent_count == 0
+    session.refresh(lead_dental)
+    assert lead_dental.status == "offer_published"
 
-    # Dental clinic should be auto-qualified, get offer generated & deployed, and email sent
-    assert report.auto_qualified_count >= 1
-    assert report.auto_disqualified_count >= 1
-    assert report.offers_generated_count >= 1
-    assert report.offers_deployed_count >= 1
+    # 2. When human confirms / auto_send=True:
+    report = orchestrator.run_full_cycle(session, ignore_window=True, auto_send=True)
+
+    # Dental clinic should now have email sent
     assert report.emails_sent_count >= 1
 
     # Verify state in DB

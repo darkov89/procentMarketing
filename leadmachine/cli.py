@@ -556,19 +556,23 @@ def ui(
 
 
 @app.command()
-def pipeline():
-    """Uruchom pełny autonomiczny cykl Lead Machine (enrich → audit → qualify → offer → email)."""
-    console.print("[bold yellow]▶ Uruchamianie pełnego autonomicznego pipeline'u Lead Machine...[/bold yellow]")
+def pipeline(
+    auto_send: bool = typer.Option(
+        False, "--auto-send", help="Automatyczna wysyłka bez wstrzymania na akceptację człowieka"
+    ),
+):
+    """Uruchom pełny cykl Lead Machine (enrich → audit → qualify → offer). Wstrzymuje wysyłkę do akceptacji człowieka (AI Act)."""
+    console.print("[bold yellow]▶ Uruchamianie pipeline'u Lead Machine (Human Oversight)...[/bold yellow]")
     from leadmachine.pipeline.orchestrator import PipelineOrchestrator
 
     init_db()
     orchestrator = PipelineOrchestrator()
 
     with get_db() as session:
-        report = orchestrator.run_full_cycle(session)
+        report = orchestrator.run_full_cycle(session, auto_send=auto_send)
 
     # Print rich report table
-    table = Table(title="Raport Autonomicznego Pipeline'u", border_style="yellow")
+    table = Table(title="Raport Pipeline'u (AI Act Human-in-the-Loop)", border_style="yellow")
     table.add_column("Etap", style="bold white")
     table.add_column("Wynik", style="bold cyan")
 
@@ -579,8 +583,11 @@ def pipeline():
     table.add_row("Auto-odrzucone", f"[red]{report.auto_disqualified_count}[/red]")
     table.add_row("Oferty wygenerowane", str(report.offers_generated_count))
     table.add_row("Oferty opublikowane (Netlify)", str(report.offers_deployed_count))
-    table.add_row("E-maile wysłane", f"[green]{report.emails_sent_count}[/green]")
-    table.add_row("E-maile nieudane", f"[red]{report.emails_failed_count}[/red]")
+    if not auto_send:
+        table.add_row("E-maile (AI Act Nadzór)", "[bold yellow]Wstrzymane do weryfikacji człowieka[/bold yellow]")
+    else:
+        table.add_row("E-maile wysłane", f"[green]{report.emails_sent_count}[/green]")
+        table.add_row("E-maile nieudane", f"[red]{report.emails_failed_count}[/red]")
 
     console.print(table)
 

@@ -2,6 +2,14 @@ import { db, offers, leads } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { renderOfferPage } from "@/lib/html-renderer";
 import { notFound } from "next/navigation";
+import { Metadata } from "next";
+
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+  },
+};
 
 export default async function OfferPage({
   params,

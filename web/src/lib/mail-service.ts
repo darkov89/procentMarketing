@@ -5,6 +5,7 @@ import { db, leads, messages, suppression } from "./db";
 import { eq, or } from "drizzle-orm";
 import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
+import { transitionLead } from "./state-machine";
 
 export interface MailConfig {
   smtpHost?: string;
@@ -440,17 +441,15 @@ export async function pollInboxAndProcess(customConfig?: Partial<MailConfig>): P
             unsubscribedCount++;
             actionTaken = "Wypisano z bazy i dodano do SuppressionList";
 
-            // Update lead status
-            await db
-              .update(leads)
-              .set({
-                status: classification.classification === "unsubscribe" ? "unsubscribed" : "replied_negative",
-                rejectionReason: classification.reason,
-              })
-              .where(eq(leads.id, matchedLead.id));
+            await transitionLead({
+              leadId: matchedLead.id,
+              toStatus: classification.classification === "unsubscribe" ? "unsubscribed" : "replied_negative",
+              reason: classification.reason,
+              actor: `system:imap_${classification.classification}`,
+            });
 
             // Add to suppression list (both email and domain)
-            const hashedEmail = crypto.createHash("sha256").update(fromAddress).digest("hex");
+            const hashedEmail = crypto.createHash("sha256").update(fromAddress.toLowerCase().trim()).digest("hex");
             await db
               .insert(suppression)
               .values({
@@ -459,25 +458,57 @@ export async function pollInboxAndProcess(customConfig?: Partial<MailConfig>): P
                 reason: `Odpowiedź ${classification.classification}: ${classification.reason}`,
               })
               .onConflictDoNothing();
+
+            const atIdx = fromAddress.indexOf("@");
+            if (atIdx !== -1) {
+              const domain = fromAddress.slice(atIdx + 1);
+              const hashedDomain = crypto.createHash("sha256").update(domain).digest("hex");
+              await db
+                .insert(suppression)
+                .values({
+                  hashedDomain,
+                  rawIdentifier: domain,
+                  reason: `Domena wykluczona po odpowiedzi ${classification.classification}`,
+                })
+                .onConflictDoNothing();
+            }
           } else if (classification.classification === "interested") {
             interestedCount++;
             actionTaken = "Zaktualizowano status na 'replied_interested' (Wymaga kontaktu!)";
 
-            await db
-              .update(leads)
-              .set({
-                status: "replied_interested",
-              })
-              .where(eq(leads.id, matchedLead.id));
+            await transitionLead({
+              leadId: matchedLead.id,
+              toStatus: "replied_interested",
+              reason: classification.reason,
+              actor: "system:imap_interested",
+            });
           } else if (classification.classification === "question") {
             actionTaken = "Zaktualizowano status na 'replied_question' (Klient pyta o ofertę)";
 
-            await db
-              .update(leads)
-              .set({
-                status: "replied_question",
-              })
-              .where(eq(leads.id, matchedLead.id));
+            await transitionLead({
+              leadId: matchedLead.id,
+              toStatus: "replied_question",
+              reason: classification.reason,
+              actor: "system:imap_question",
+            });
+          } else if (classification.classification === "auto_reply") {
+            actionTaken = "Zaktualizowano status na 'paused_autoreply'";
+
+            await transitionLead({
+              leadId: matchedLead.id,
+              toStatus: "paused_autoreply",
+              reason: classification.reason,
+              actor: "system:imap_auto_reply",
+            });
+          } else if (classification.classification === "bounce") {
+            actionTaken = "Zaktualizowano status na 'bounced'";
+
+            await transitionLead({
+              leadId: matchedLead.id,
+              toStatus: "bounced",
+              reason: classification.reason,
+              actor: "system:imap_bounce",
+            });
           } else {
             actionTaken = `Zarejestrowano jako ${classification.classification}`;
           }

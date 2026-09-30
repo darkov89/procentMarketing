@@ -21,7 +21,7 @@ export function middleware(request: NextRequest) {
   }
 
   // 3. Allow public client offer landing pages (accessed by leads)
-  if (pathname.startsWith("/offers")) {
+  if (pathname.startsWith("/offers") || pathname.startsWith("/o/")) {
     return NextResponse.next();
   }
 

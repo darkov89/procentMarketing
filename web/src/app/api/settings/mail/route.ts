@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { getResolvedMailConfig } from "@/lib/mail-service";
+import { requireUser } from "@/lib/auth";
 import fs from "fs";
 import path from "path";
 
 export async function GET() {
   try {
+    await requireUser();
     const cfg = getResolvedMailConfig();
     return NextResponse.json({
       success: true,
@@ -40,6 +42,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    await requireUser();
     const body = await req.json();
 
     // Update in-memory process.env

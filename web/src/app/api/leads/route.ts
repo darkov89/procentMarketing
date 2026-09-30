@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
-import { db, leads, audits, offers, messages, contacts } from "@/lib/db";
+import { db, leads, audits, offers, messages, contacts, leadEvents } from "@/lib/db";
 import { desc, or, ilike, notIlike, isNull, eq } from "drizzle-orm";
 import { validateGeo } from "@/lib/geo";
 import { normalizeNip, normalizePhone } from "@/lib/dedup";
+import { requireUser } from "@/lib/auth";
 
 export async function GET(req: Request) {
   try {
+    await requireUser();
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("search")?.toLowerCase();
     const city = searchParams.get("city");
@@ -19,6 +21,7 @@ export async function GET(req: Request) {
         offer: true,
         contacts: true,
         messages: true,
+        leadEvents: true,
       },
     });
 
@@ -45,6 +48,9 @@ export async function GET(req: Request) {
 
     return NextResponse.json({ success: true, leads: filtered });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     console.error("Error fetching leads:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -52,6 +58,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
+    const user = await requireUser();
     const body = await req.json();
     const { companyName, city, address, website, email, phone, industry } = body;
 
@@ -88,8 +95,20 @@ export async function POST(req: Request) {
       })
       .returning();
 
+    await db.insert(leadEvents).values({
+      leadId: newLead.id,
+      fromStatus: "none",
+      toStatus: "new",
+      reason: "Ręczne dodanie leada w panelu",
+      actor: `user:${user.id}`,
+      createdAt: new Date(),
+    });
+
     return NextResponse.json({ success: true, lead: newLead });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     console.error("Error creating lead:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

@@ -69,13 +69,61 @@ interface LeadItem {
   messages?: any[];
 }
 
+function getEmailPreview(lead: LeadItem) {
+  const contactName = lead.contacts?.[0]?.firstName || null;
+  const salutation = contactName ? `Dzień dobry Panie/Pani ${contactName},` : "Dzień dobry,";
+  const city = lead.city || "Legnicy";
+  const offerUrl =
+    lead.offer?.token
+      ? `/o/${lead.offer.token}`
+      : lead.offer?.deployUrl ||
+        lead.offer?.bookingUrl ||
+        (lead.offer?.slug ? `/offers/${lead.offer.slug}` : "https://procentmarketing.pl");
+
+  const subject = `${lead.companyName} — dedykowana strategia automatyzacji i pozyskiwania klientów (${city})`;
+
+  const bodyText = `${salutation}
+
+Zwracam się do Państwa w imieniu agencji Procent Marketing z Legnicy.
+
+W ramach analizy lokalnego rynku w rejonie ${city} przygotowaliśmy dla firmy ${lead.companyName} dedykowaną stronę ze wstępną analizą obecności w sieci oraz propozycją automatyzacji zapytań:
+
+👉 Dedykowana strona dla Państwa firmy: ${offerUrl}
+
+Prezentacja zawiera:
+• Wnioski z audytu technologicznego Państwa witryny,
+• Rekomendowane moduły eliminujące utratę zapytań od klientów,
+• Przejrzysty model wdrożenia i transparentną wycenę.
+
+Wewnątrz strony znajduje się bezpośredni kalendarz do 15-minutowej, bezpłatnej rozmowy.
+
+Z poważaniem,
+Dariusz Rink
+Zespół Procent Marketing (AM PROCENT Sp. z o.o.)
+ul. M. Rataja 15, 59-220 Legnica
+NIP: 6912590158 | www.procentmarketing.pl
+
+---
+Klauzula informacyjna (Art. 14 RODO):
+Administratorem Państwa danych jest AM PROCENT Sp. z o.o. Dane pozyskano z publicznie dostępnych rejestrów (CEIDG/KRS) lub strony WWW. Aby zrezygnować, odpowiedz 'STOP'.`;
+
+  return { subject, bodyText, offerUrl };
+}
+
 export default function LeadMachineDashboard() {
   const [leads, setLeads] = useState<LeadItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [activeTab, setActiveTab] = useState<"crm" | "generator" | "review" | "import" | "settings" | "team">("crm");
+  const [activeTab, setActiveTab] = useState<"crm" | "generator" | "outreach" | "review" | "import" | "settings" | "team">("crm");
+
+  // Batch Outreach & AI Act Human Oversight state
+  const [selectedOutreachIds, setSelectedOutreachIds] = useState<number[]>([]);
+  const [batchSending, setBatchSending] = useState(false);
+  const [expandedDraftLeadId, setExpandedDraftLeadId] = useState<number | null>(null);
+  const [inlineEmailInput, setInlineEmailInput] = useState<{ [leadId: number]: string }>({});
+  const [outreachSearch, setOutreachSearch] = useState("");
 
   // Auth & Team state
   const [currentUser, setCurrentUser] = useState<{ id: number; email: string; name: string; role: string } | null>(null);
@@ -372,6 +420,26 @@ export default function LeadMachineDashboard() {
     return Array.from(set).sort();
   }, [leads]);
 
+  // Pending approval leads: have an offer generated, not yet sent, not disqualified
+  const pendingApprovalLeads = useMemo(() => {
+    return leads.filter((l) => {
+      const hasOffer = Boolean(l.offer);
+      const isSent =
+        l.status === "sent" ||
+        l.status === "followup_sent" ||
+        l.messages?.some((m) => m.direction === "outbound" && m.channel === "email" && m.status === "sent");
+      const isDisqualified = l.status === "disqualified";
+      return hasOffer && !isSent && !isDisqualified;
+    });
+  }, [leads]);
+
+  // Keep selectedOutreachIds in sync by default
+  useEffect(() => {
+    if (pendingApprovalLeads.length > 0 && selectedOutreachIds.length === 0) {
+      setSelectedOutreachIds(pendingApprovalLeads.map((l) => l.id));
+    }
+  }, [pendingApprovalLeads]);
+
   // Metric counts
   const metrics = useMemo(() => {
     const total = leads.length;
@@ -380,9 +448,113 @@ export default function LeadMachineDashboard() {
     const offersPublished = leads.filter((l) => l.offer).length;
     const emailsSent = leads.filter((l) => l.status === "sent" || l.status === "followup_sent" || l.messages?.some((m) => m.status === "sent")).length;
     const disqualified = leads.filter((l) => l.status === "disqualified").length;
+    const readyToSend = pendingApprovalLeads.length;
 
-    return { total, qualified, needsReview, offersPublished, emailsSent, disqualified };
-  }, [leads]);
+    return { total, qualified, needsReview, offersPublished, emailsSent, disqualified, readyToSend };
+  }, [leads, pendingApprovalLeads]);
+
+  // Batch Outreach (AI Act Human Oversight - Send All or Selected)
+  const handleSendAll = async (specificIds?: number[]) => {
+    const targetIds = specificIds || selectedOutreachIds;
+    if (targetIds.length === 0) {
+      showToast("Zaznacz przynajmniej jedną firmę do wysyłki", "error");
+      return;
+    }
+
+    const missingEmailCount = targetIds.filter((id) => {
+      const l = leads.find((item) => item.id === id);
+      return !l?.emailPrimary;
+    }).length;
+
+    if (missingEmailCount > 0) {
+      const proceed = confirm(
+        `Uwaga: ${missingEmailCount} z wybranych firm nie posiada adresu e-mail i zostanie pominięte. Czy chcesz wysłać wiadomości do pozostałych ${targetIds.length - missingEmailCount} firm?`
+      );
+      if (!proceed) return;
+    }
+
+    setBatchSending(true);
+    showToast(`Wysyłanie ${targetIds.length} maili (Zatwierdzenie Człowieka / AI Act)...`, "info");
+    try {
+      const res = await fetch("/api/outreach/send-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ leadIds: targetIds }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(
+          `Wysłano pomyślnie ${data.sentCount} e-maili! (Pominięto: ${data.skippedCount}, Błędów: ${data.failedCount})`,
+          data.failedCount > 0 ? "info" : "success"
+        );
+        fetchLeads();
+      } else {
+        showToast(data.error || "Błąd wysyłki zbiorczej", "error");
+      }
+    } catch (err: any) {
+      showToast("Błąd wysyłki: " + (err.message || String(err)), "error");
+    } finally {
+      setBatchSending(false);
+    }
+  };
+
+  // Single email send
+  const handleSendSingle = async (leadId: number) => {
+    const lead = leads.find((l) => l.id === leadId);
+    if (!lead?.emailPrimary) {
+      showToast("Ten lead nie posiada adresu e-mail. Wpisz e-mail przed wysyłką.", "error");
+      return;
+    }
+
+    showToast(`Wysyłanie e-maila do ${lead.companyName}...`, "info");
+    try {
+      const res = await fetch(`/api/outreach/${leadId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ignoreWindow: true }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Wysłano e-mail do ${lead.companyName}!`, "success");
+        fetchLeads();
+      } else {
+        showToast(data.error || "Błąd wysyłki", "error");
+      }
+    } catch (err: any) {
+      showToast("Błąd wysyłki: " + (err.message || String(err)), "error");
+    }
+  };
+
+  // Save missing email inline
+  const handleSaveMissingEmail = async (leadId: number) => {
+    const email = inlineEmailInput[leadId]?.trim();
+    if (!email || !email.includes("@")) {
+      showToast("Wprowadź prawidłowy adres e-mail", "error");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ emailPrimary: email }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast("Zapisano adres e-mail!", "success");
+        setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, emailPrimary: email } : l)));
+        setInlineEmailInput((prev) => {
+          const next = { ...prev };
+          delete next[leadId];
+          return next;
+        });
+      } else {
+        showToast(data.error || "Błąd zapisu e-maila", "error");
+      }
+    } catch {
+      showToast("Błąd zapisu", "error");
+    }
+  };
 
   // Inline patch update
   const handleSaveInline = async (id: number) => {
@@ -554,17 +726,18 @@ export default function LeadMachineDashboard() {
     }
   };
 
-  // Run Full Pipeline
+  // Run Full Pipeline (Enrich -> Audit -> Qualify -> Offer -> Pause for Human Oversight)
   const handleRunFullPipeline = async () => {
     setPipelineRunning(true);
-    showToast("Uruchamianie pełnego cyklu (Enrich -> Audit -> Qualify -> Offer -> Outreach)...", "info");
+    showToast("Uruchamianie cyklu (Audyt WWW -> Kwalifikacja -> Generowanie Ofert AI)... Wysyłka zatrzymana do akceptacji.", "info");
     try {
       const res = await fetch("/api/pipeline", { method: "POST" });
       const data = await res.json();
       if (data.success) {
         setPipelineReport(data.report);
-        showToast("Zakończono pełny cykl autonomiczny!");
+        showToast("Zakończono generowanie ofert! Przejrzyj treści i kliknij 'Wyślij wszystko'.", "success");
         fetchLeads();
+        setActiveTab("outreach");
       } else {
         showToast(data.error || "Błąd pipeline'u", "error");
       }
@@ -611,7 +784,7 @@ export default function LeadMachineDashboard() {
     }
   };
 
-  // Run Autonomous End-to-End Scale Cycle (Scrape -> Audit/Scrape Email -> Grounded AI Offer -> Send)
+  // Run Scale Cycle with Human-in-the-Loop (Scrape -> Audit/Scrape Email -> Grounded AI Offer -> Review Queue)
   const handleRunAutonomousScaleCycle = async () => {
     setScraperLoading(true);
     const scaleLabel = scraperCompanyScale === "mikro" ? "Mikroprzedsiębiorstwa (CEIDG)" : scraperCompanyScale === "male" ? "Małe Przedsiębiorstwa (KRS)" : "MŚP";
@@ -636,18 +809,19 @@ export default function LeadMachineDashboard() {
       setScraperResult(dataScraper);
       setScraperLoading(false);
 
-      // Step 2: Trigger Pipeline
+      // Step 2: Trigger Pipeline (Offer Generation & Pause before dispatch)
       setPipelineRunning(true);
-      showToast(`[Krok 2/2] Czytanie działalności ze stron WWW, deep-scraping e-maili, tworzenie dedykowanych ofert AI i wysyłka...`, "info");
+      showToast(`[Krok 2/2] Czytanie działalności ze stron WWW, deep-scraping e-maili, tworzenie dedykowanych ofert AI (Nadzór Człowieka)...`, "info");
       const resPipeline = await fetch("/api/pipeline", { method: "POST" });
       const dataPipeline = await resPipeline.json();
       if (dataPipeline.success) {
         setPipelineReport(dataPipeline.report);
         showToast(
-          `Cykl ukończony! Zaudytowano WWW: ${dataPipeline.report.auditedCount}, Oferty AI: ${dataPipeline.report.offersGeneratedCount}, E-maile: ${dataPipeline.report.emailsSentCount}`,
+          `Cykl ukończony! Zaudytowano WWW: ${dataPipeline.report.auditedCount}, Oferty AI: ${dataPipeline.report.offersGeneratedCount}. Wiadomości oczekują na Twoje zatwierdzenie (AI Act).`,
           "success"
         );
         fetchLeads();
+        setActiveTab("outreach");
       } else {
         showToast(dataPipeline.error || "Błąd wykonania pipeline'u", "error");
       }
@@ -1103,9 +1277,23 @@ export default function LeadMachineDashboard() {
             <span className="text-[11px] font-bold uppercase tracking-wider text-[#34D399]">Zakwalifikowane</span>
             <div className="text-2xl font-black text-[#34D399] mt-1">{metrics.qualified}</div>
           </div>
-          <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#FBBF24]">Do Weryfikacji</span>
-            <div className="text-2xl font-black text-[#FBBF24] mt-1">{metrics.needsReview}</div>
+          <div
+            onClick={() => setActiveTab("outreach")}
+            className="bg-[#141C2E] border-2 border-[#FFE600]/80 p-3.5 rounded-xl cursor-pointer hover:bg-[#1E293B] transition-all group"
+            title="Kliknij, aby przejść do zatwierdzania i wysyłki ofert"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-black uppercase tracking-wider text-[#FFE600]">
+                Do Wysyłki (AI Act)
+              </span>
+              <span className="text-[9px] bg-[#FFE600] text-black font-extrabold px-1.5 py-0.5 rounded">
+                AUDYT
+              </span>
+            </div>
+            <div className="text-2xl font-black text-[#FFE600] mt-1 flex items-center justify-between">
+              <span>{metrics.readyToSend}</span>
+              <ArrowRight size={18} className="text-[#FFE600] group-hover:translate-x-1 transition-transform" />
+            </div>
           </div>
           <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl">
             <span className="text-[11px] font-bold uppercase tracking-wider text-[#38BDF8]">Oferty Netlify</span>
@@ -1116,14 +1304,57 @@ export default function LeadMachineDashboard() {
             <div className="text-2xl font-black text-[#C084FC] mt-1">{metrics.emailsSent}</div>
           </div>
           <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#FB7185]">Odrzucone</span>
-            <div className="text-2xl font-black text-[#FB7185] mt-1">{metrics.disqualified}</div>
+            <span className="text-[11px] font-bold uppercase tracking-wider text-[#FBBF24]">Weryfikacja Leada</span>
+            <div className="text-2xl font-black text-[#FBBF24] mt-1">{metrics.needsReview}</div>
           </div>
         </div>
       </section>
 
       {/* MAIN CONTAINER */}
       <main className="max-w-[1700px] mx-auto p-6">
+        {/* BANNER: AI ACT HUMAN OVERSIGHT ALERT */}
+        {pendingApprovalLeads.length > 0 && (
+          <div className="mb-6 bg-gradient-to-r from-[#141C2E] via-[#1A2338] to-[#141C2E] border-2 border-[#FFE600]/70 p-4 sm:p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl shadow-yellow-500/5">
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 bg-[#FFE600]/10 border border-[#FFE600]/30 text-[#FFE600] rounded-xl shrink-0 mt-0.5">
+                <ShieldCheck size={26} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="bg-[#FFE600] text-black text-[10px] font-black uppercase px-2 py-0.5 rounded tracking-wider">
+                    AI Act Art. 14 • Maszyna Wstrzymana
+                  </span>
+                  <span className="text-xs text-[#38BDF8] font-bold">
+                    Oczekiwanie na akceptację człowieka
+                  </span>
+                </div>
+                <h3 className="text-base font-extrabold text-white mt-1">
+                  {pendingApprovalLeads.length} wygenerowanych ofert i maili czeka na Twoje sprawdzenie
+                </h3>
+                <p className="text-xs text-[#94A3B8] mt-0.5">
+                  Automatyczna wysyłka została zatrzymana. Możesz przejrzeć każdą stronę oferty WWW, sprawdzić treść maila i kliknąć „Wyślij wszystko” jednym guzikiem.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0 self-end md:self-center">
+              <button
+                onClick={() => setActiveTab("outreach")}
+                className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8] text-[#38BDF8] hover:text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all cursor-pointer"
+              >
+                <Eye size={15} /> Przejrzyj oferty i maile
+              </button>
+              <button
+                onClick={() => handleSendAll()}
+                disabled={batchSending}
+                className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-black text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/20 disabled:opacity-50 cursor-pointer"
+              >
+                <Send size={15} className={batchSending ? "animate-spin" : ""} />
+                {batchSending ? "Wysyłanie..." : `🚀 Wyślij wszystko (${pendingApprovalLeads.length})`}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* NAVIGATION TABS */}
         <div className="flex border-b border-[#28354D] gap-2 mb-6 overflow-x-auto pb-1">
           <button
@@ -1149,6 +1380,22 @@ export default function LeadMachineDashboard() {
             Lead Generator & Scraper
           </button>
           <button
+            onClick={() => setActiveTab("outreach")}
+            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all relative ${
+              activeTab === "outreach"
+                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
+                : "text-[#94A3B8] hover:text-white"
+            }`}
+          >
+            <Send size={16} />
+            <span>Zatwierdzanie Ofert & Wysyłka</span>
+            {pendingApprovalLeads.length > 0 && (
+              <span className="bg-[#FFE600] text-black text-[10px] font-black px-2 py-0.5 rounded-full">
+                {pendingApprovalLeads.length}
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => setActiveTab("review")}
             className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all ${
               activeTab === "review"
@@ -1157,7 +1404,7 @@ export default function LeadMachineDashboard() {
             }`}
           >
             <AlertTriangle size={16} />
-            Kolejka Weryfikacji ({metrics.needsReview})
+            Kolejka Kwalifikacji ({metrics.needsReview})
           </button>
           <button
             onClick={() => setActiveTab("settings")}
@@ -1432,7 +1679,7 @@ export default function LeadMachineDashboard() {
                             <td className="p-3.5">
                               {lead.offer ? (
                                 <a
-                                  href={`/offers/${lead.offer.slug}`}
+                                  href={lead.offer.token ? `/o/${lead.offer.token}` : `/offers/${lead.offer.slug}`}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="text-xs bg-[#0C4A6E] text-[#38BDF8] border border-[#0284C7] px-2.5 py-1 rounded-md font-bold hover:underline flex items-center gap-1 w-max"
@@ -1884,6 +2131,279 @@ export default function LeadMachineDashboard() {
                     </span>
                   )}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB: CAMPAIGN REVIEW & BATCH DISPATCH (AI ACT HUMAN OVERSIGHT) */}
+        {activeTab === "outreach" && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            {/* Header banner */}
+            <div className="bg-[#141C2E] border-2 border-[#FFE600]/60 p-6 rounded-2xl shadow-xl space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-[#FFE600] text-black text-[10px] font-black uppercase px-2.5 py-0.5 rounded tracking-wider">
+                      AI Act Art. 14 • Human Oversight
+                    </span>
+                    <span className="bg-emerald-950/80 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded">
+                      Tryb: SANDBOX (bezpieczny)
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-black text-white mt-1 flex items-center gap-2">
+                    <ShieldCheck className="text-[#FFE600]" size={24} />
+                    Centrum Zatwierdzania Kampanii & Wysyłki Ofert
+                  </h2>
+                  <p className="text-xs text-[#94A3B8] mt-1 max-w-2xl">
+                    Maszyna nie wysyła maili bez Twojej wiedzy. Poniżej możesz przejrzeć każdą wygenerowaną ofertę WWW
+                    oraz treść spersonalizowanego maila. Kiedy wszystko zweryfikujesz, kliknij <strong>„Wyślij wszystko jednym kliknięciem”</strong>.
+                  </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  <button
+                    onClick={() => handleSendAll()}
+                    disabled={batchSending || pendingApprovalLeads.length === 0}
+                    className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-black text-sm px-6 py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-xl shadow-yellow-500/20 disabled:opacity-50 cursor-pointer"
+                  >
+                    <Send size={18} className={batchSending ? "animate-spin" : ""} />
+                    {batchSending ? "Wysyłanie maili..." : `🚀 Wyślij wszystko (${pendingApprovalLeads.length})`}
+                  </button>
+                </div>
+              </div>
+
+              {/* Status bar */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-[#28354D] text-xs">
+                <div className="bg-[#0A0E17] p-2.5 rounded-lg border border-[#28354D]">
+                  <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Gotowe do wysyłki</span>
+                  <span className="text-white font-extrabold text-base">{pendingApprovalLeads.length} ofert</span>
+                </div>
+                <div className="bg-[#0A0E17] p-2.5 rounded-lg border border-[#28354D]">
+                  <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Zaznaczone</span>
+                  <span className="text-[#FFE600] font-extrabold text-base">{selectedOutreachIds.length} firm</span>
+                </div>
+                <div className="bg-[#0A0E17] p-2.5 rounded-lg border border-[#28354D]">
+                  <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Bezpiecznik (Kill-switch)</span>
+                  <span className="text-[#38BDF8] font-extrabold text-base">STOP = Aktywny</span>
+                </div>
+                <div className="bg-[#0A0E17] p-2.5 rounded-lg border border-[#28354D]">
+                  <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Klauzula prawna</span>
+                  <span className="text-emerald-400 font-extrabold text-base">Art. 14 RODO + STOP</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Selection Toolbar */}
+            {pendingApprovalLeads.length > 0 && (
+              <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-white select-none">
+                    <input
+                      type="checkbox"
+                      checked={
+                        pendingApprovalLeads.length > 0 &&
+                        selectedOutreachIds.length === pendingApprovalLeads.length
+                      }
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedOutreachIds(pendingApprovalLeads.map((l) => l.id));
+                        } else {
+                          setSelectedOutreachIds([]);
+                        }
+                      }}
+                      className="w-4 h-4 rounded text-[#FFE600] accent-[#FFE600] cursor-pointer"
+                    />
+                    <span>Zaznacz wszystkie ({pendingApprovalLeads.length})</span>
+                  </label>
+
+                  {selectedOutreachIds.length > 0 && (
+                    <span className="text-xs text-[#94A3B8]">
+                      (Wybrano {selectedOutreachIds.length} z {pendingApprovalLeads.length})
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="text"
+                    placeholder="Filtruj firmy..."
+                    value={outreachSearch}
+                    onChange={(e) => setOutreachSearch(e.target.value)}
+                    className="bg-[#0A0E17] border border-[#28354D] text-xs px-3 py-1.5 rounded-lg text-white placeholder-[#64748B] focus:border-[#FFE600] outline-none w-48"
+                  />
+                  {selectedOutreachIds.length > 0 && selectedOutreachIds.length !== pendingApprovalLeads.length && (
+                    <button
+                      onClick={() => handleSendAll(selectedOutreachIds)}
+                      disabled={batchSending}
+                      className="bg-[#1E293B] hover:bg-[#FFE600] hover:text-black border border-[#FFE600] text-[#FFE600] font-bold text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Send size={13} />
+                      Wyślij tylko zaznaczone ({selectedOutreachIds.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* List of Leads / Offers ready */}
+            {pendingApprovalLeads.length === 0 ? (
+              <div className="bg-[#141C2E] border border-[#28354D] p-12 text-center rounded-2xl space-y-3">
+                <CheckCircle2 size={52} className="text-[#34D399] mx-auto mb-2" />
+                <h3 className="text-lg font-bold text-white">Brak oczekujących ofert do wysyłki!</h3>
+                <p className="text-sm text-[#94A3B8] max-w-md mx-auto">
+                  Wszystkie wygenerowane oferty zostały już wysłane lub nie ma jeszcze zakwalifikowanych firm z ofertami.
+                </p>
+                <div className="pt-2">
+                  <button
+                    onClick={() => setActiveTab("generator")}
+                    className="bg-[#FFE600] text-black font-extrabold text-xs px-5 py-2.5 rounded-lg inline-flex items-center gap-2 hover:bg-[#FFF04D] transition-all cursor-pointer"
+                  >
+                    <Search size={15} /> Przejdź do Lead Generatora & Wyszukaj Nowe Firmy
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {pendingApprovalLeads
+                  .filter((lead) => {
+                    if (!outreachSearch) return true;
+                    const q = outreachSearch.toLowerCase();
+                    return (
+                      lead.companyName.toLowerCase().includes(q) ||
+                      (lead.city && lead.city.toLowerCase().includes(q)) ||
+                      (lead.industry && lead.industry.toLowerCase().includes(q))
+                    );
+                  })
+                  .map((lead) => {
+                    const preview = getEmailPreview(lead);
+                    const isSelected = selectedOutreachIds.includes(lead.id);
+                    const isExpanded = expandedDraftLeadId === lead.id;
+
+                    return (
+                      <div
+                        key={lead.id}
+                        className={`bg-[#141C2E] border rounded-2xl p-5 transition-all shadow-md ${
+                          isSelected ? "border-[#FFE600]/80 shadow-yellow-500/5" : "border-[#28354D]"
+                        }`}
+                      >
+                        {/* Top row */}
+                        <div className="flex flex-wrap items-start justify-between gap-3 pb-3 border-b border-[#28354D]">
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setSelectedOutreachIds((prev) => [...prev, lead.id]);
+                                } else {
+                                  setSelectedOutreachIds((prev) => prev.filter((id) => id !== lead.id));
+                                }
+                              }}
+                              className="mt-1 w-4 h-4 rounded text-[#FFE600] accent-[#FFE600] cursor-pointer"
+                            />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs text-[#64748B]">#{lead.id}</span>
+                                <h3 className="text-base font-extrabold text-white">{lead.companyName}</h3>
+                                <span className="badge badge-approved">Score: {lead.score} pkt</span>
+                              </div>
+                              <p className="text-xs text-[#94A3B8] mt-0.5">
+                                📍 {lead.city || "Brak miasta"} • {lead.industry || "Brak branży"}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {preview.offerUrl && (
+                              <a
+                                href={preview.offerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8]/60 text-[#38BDF8] font-bold text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all"
+                                title="Otwórz wygenerowaną stronę WWW oferty w nowej karcie"
+                              >
+                                <ExternalLink size={13} />
+                                <span>Zobacz Stronę Oferty</span>
+                              </a>
+                            )}
+                            <button
+                              onClick={() => {
+                                setSelectedLead(lead);
+                                setDrawerTab("email");
+                              }}
+                              className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all"
+                              title="Edytuj treść w wysuwanym panelu bocznym"
+                            >
+                              <Edit2 size={13} />
+                              <span>Edytuj w panelu</span>
+                            </button>
+                            <button
+                              onClick={() => handleSendSingle(lead.id)}
+                              disabled={batchSending}
+                              className="bg-[#059669] hover:bg-[#10B981] text-white font-extrabold text-xs px-3.5 py-2 rounded-lg flex items-center gap-1.5 transition-all shadow-md shadow-emerald-500/20 disabled:opacity-50"
+                              title="Wyślij natychmiast tę jedną wiadomość"
+                            >
+                              <Send size={13} />
+                              <span>Wyślij ten e-mail</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Recipient status */}
+                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[#94A3B8] font-bold">Odbiorca:</span>
+                            {lead.emailPrimary ? (
+                              <span className="text-[#38BDF8] font-mono font-bold bg-[#0A0E17] px-2.5 py-1 rounded border border-[#28354D]">
+                                ✉️ {lead.emailPrimary}
+                              </span>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span className="text-[#FB7185] font-bold">⚠️ Brak e-maila:</span>
+                                <input
+                                  type="email"
+                                  placeholder="Wpisz np. biuro@firma.pl"
+                                  value={inlineEmailInput[lead.id] || ""}
+                                  onChange={(e) =>
+                                    setInlineEmailInput((prev) => ({ ...prev, [lead.id]: e.target.value }))
+                                  }
+                                  className="bg-[#0A0E17] border border-[#FB7185]/60 text-white font-mono text-xs px-2.5 py-1 rounded outline-none focus:border-[#FFE600]"
+                                />
+                                <button
+                                  onClick={() => handleSaveMissingEmail(lead.id)}
+                                  className="bg-[#FFE600] text-black font-extrabold text-xs px-3 py-1 rounded hover:bg-[#FFF04D]"
+                                >
+                                  Zapisz
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={() => setExpandedDraftLeadId(isExpanded ? null : lead.id)}
+                            className="text-[#FFE600] hover:underline font-bold text-xs flex items-center gap-1 cursor-pointer"
+                          >
+                            <Eye size={13} />
+                            {isExpanded ? "Zwiń podgląd maila" : "Podgląd treści maila"}
+                          </button>
+                        </div>
+
+                        {/* Email Preview Drawer */}
+                        {isExpanded && (
+                          <div className="mt-3.5 pt-3 border-t border-[#28354D] space-y-2.5">
+                            <div className="text-xs font-mono bg-[#0A0E17] p-2.5 rounded-lg border border-[#28354D]">
+                              <span className="text-[#94A3B8] font-bold">Temat maila: </span>
+                              <span className="text-white font-semibold">{preview.subject}</span>
+                            </div>
+                            <pre className="text-xs text-[#CBD5E1] whitespace-pre-wrap font-sans bg-[#0A0E17] p-4 rounded-xl border border-[#28354D] leading-relaxed max-h-64 overflow-y-auto">
+                              {preview.bodyText}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
               </div>
             )}
           </div>
@@ -2993,7 +3513,7 @@ export default function LeadMachineDashboard() {
                     <div className="flex items-center justify-between">
                       <span className="badge badge-offer">OFERTA OPUBLIKOWANA</span>
                       <a
-                        href={`/offers/${selectedLead.offer.slug}`}
+                        href={selectedLead.offer.token ? `/o/${selectedLead.offer.token}` : `/offers/${selectedLead.offer.slug}`}
                         target="_blank"
                         className="text-xs bg-[#FFE600] text-black font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
                       >
@@ -3011,7 +3531,7 @@ export default function LeadMachineDashboard() {
                         Podgląd Strony Klienta:
                       </div>
                       <iframe
-                        src={`/offers/${selectedLead.offer.slug}`}
+                        src={selectedLead.offer.token ? `/o/${selectedLead.offer.token}` : `/offers/${selectedLead.offer.slug}`}
                         className="w-full h-[400px] bg-[#0A0C10]"
                       />
                     </div>

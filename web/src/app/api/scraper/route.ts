@@ -4,6 +4,8 @@ import { eq, or } from "drizzle-orm";
 import { validateGeo } from "@/lib/geo";
 import { normalizePhone, normalizeNip, normalizeDomain } from "@/lib/dedup";
 import { auditWebsite } from "@/lib/auditor";
+import { requireUser } from "@/lib/auth";
+
 // Resolves Google Maps / Places API key from environment
 function getGoogleApiKey(): string | undefined {
   const envKey =
@@ -18,23 +20,6 @@ function getGoogleApiKey(): string | undefined {
   }
 
   return undefined;
-}
-
-// Generates a valid Polish 10-digit NIP with correct checksum
-function generateValidNip(taxOfficePrefix = "691"): string {
-  const weights = [6, 5, 7, 2, 3, 4, 5, 6, 7];
-  while (true) {
-    let digits = taxOfficePrefix.split("").map(Number);
-    while (digits.length < 9) {
-      digits.push(Math.floor(Math.random() * 10));
-    }
-    const sum = digits.reduce((acc, d, i) => acc + d * weights[i], 0);
-    const checksum = sum % 11;
-    if (checksum < 10) {
-      digits.push(checksum);
-      return digits.join("");
-    }
-  }
 }
 
 function slugify(text: string): string {
@@ -512,167 +497,9 @@ const REGIONAL_BUSINESS_CATALOG: Record<
   ],
 };
 
-const FIRST_NAMES = [
-  "Marek",
-  "Piotr",
-  "Tomasz",
-  "Krzysztof",
-  "Michał",
-  "Janusz",
-  "Dariusz",
-  "Paweł",
-  "Adam",
-  "Marcin",
-  "Anna",
-  "Joanna",
-  "Magdalena",
-  "Katarzyna",
-  "Agnieszka",
-];
-const LAST_NAMES = [
-  "Kowalski",
-  "Nowak",
-  "Wiśniewski",
-  "Wójcik",
-  "Kamiński",
-  "Lewandowski",
-  "Dąbrowski",
-  "Zieliński",
-  "Szymański",
-  "Kozłowski",
-  "Mazur",
-  "Krawczyk",
-  "Kaczmarek",
-  "Piotrowski",
-  "Grabowski",
-  "Włodarczyk",
-  "Czarnecki",
-  "Urbański",
-];
-
-// Generates fresh, non-colliding regional enterprises for Lower Silesia
-async function generateFreshRegionalLeads(params: {
-  city: string;
-  keyword: string;
-  companyScale: "mikro" | "male" | "msp";
-  count: number;
-}): Promise<Array<any>> {
-  const cityInfo = resolveCityInfo(params.city);
-  const keywordClean = params.keyword.trim() || "Usługi";
-  const capitalizedKey =
-    keywordClean.charAt(0).toUpperCase() + keywordClean.slice(1).toLowerCase();
-
-  const generatedItems: Array<any> = [];
-
-  for (let i = 0; i < params.count * 3 && generatedItems.length < params.count; i++) {
-    const isSpZoo =
-      params.companyScale === "male"
-        ? true
-        : params.companyScale === "mikro"
-        ? false
-        : i % 2 === 1;
-
-    const scale = isSpZoo ? "mała" : "mikro";
-    const legal = isSpZoo ? "Sp. z o.o. (KRS)" : "JDG (CEIDG)";
-
-    const fName = FIRST_NAMES[(i * 3 + Math.floor(Math.random() * 5)) % FIRST_NAMES.length];
-    const lName = LAST_NAMES[(i * 2 + Math.floor(Math.random() * 7)) % LAST_NAMES.length];
-
-    let compName = "";
-    let base = "";
-    if (isSpZoo) {
-      const templates = [
-        `Dolnośląskie Centrum ${capitalizedKey} Sp. z o.o.`,
-        `Miedź-${capitalizedKey} System Sp. z o.o.`,
-        `Vistula ${capitalizedKey} & Solutions Sp. z o.o.`,
-        `${cityInfo.name} ${capitalizedKey} Grupa B2B Sp. z o.o.`,
-        `Pol-Euro ${capitalizedKey} Logistics & Service Sp. z o.o.`,
-        `Pro-${capitalizedKey} Engineering Sp. j.`,
-        `Apex ${capitalizedKey} Dolny Śląsk Sp. z o.o.`,
-        `Partnerzy ${capitalizedKey} i Przemysł Sp. z o.o.`,
-      ];
-      base = templates[i % templates.length];
-      compName = i > templates.length ? `${base} Oddział ${cityInfo.name}` : base;
-    } else {
-      const templates = [
-        `${fName} ${lName} - Usługi ${capitalizedKey} ${cityInfo.name}`,
-        `${capitalizedKey} Studio - ${fName} ${lName}`,
-        `Fach-${capitalizedKey} ${lName} - Serwis i Naprawa`,
-        `Gabinet / Praktyka ${capitalizedKey} Dr ${lName}`,
-        `${lName} & Partnerzy Usługi ${capitalizedKey}`,
-        `Mobilny Serwis ${capitalizedKey} ${fName} ${lName}`,
-        `Centrum ${capitalizedKey} ${cityInfo.name} - ${lName}`,
-        `Eko-${capitalizedKey} ${cityInfo.name} - ${fName} ${lName}`,
-      ];
-      base = templates[i % templates.length];
-      compName = i > templates.length ? `${base} II` : base;
-    }
-
-    const streetObj = cityInfo.streets[i % cityInfo.streets.length];
-    const fullAddress = `${streetObj.name}, ${cityInfo.postalCode} ${cityInfo.name}`;
-    const lat = streetObj.lat + (Math.random() - 0.5) * 0.002;
-    const lon = streetObj.lon + (Math.random() - 0.5) * 0.002;
-
-    let candidateName = compName;
-    let brandSlug = slugify(candidateName.replace(/Sp\. z o\.o\.|Sp\. j\.|Dr|Studio/g, ""));
-    let website = `https://${brandSlug}-${slugify(cityInfo.name)}.pl`;
-    let nip = generateValidNip(cityInfo.taxPrefix);
-    const phone = `+48 76 ${Math.floor(840 + Math.random() * 50)} ${Math.floor(10 + Math.random() * 89)} ${Math.floor(10 + Math.random() * 89)}`;
-
-    let attempts = 0;
-    let isUnique = false;
-    while (attempts < 5) {
-      const existing = await db.query.leads.findFirst({
-        where: or(
-          eq(leads.companyName, candidateName),
-          eq(leads.website, website),
-          eq(leads.nip, nip)
-        ),
-      });
-
-      if (!existing) {
-        isUnique = true;
-        break;
-      }
-
-      attempts++;
-      const randNum = Math.floor(100 + Math.random() * 9000);
-      if (isSpZoo) {
-        candidateName = `${base} Grupa ${randNum} Sp. z o.o.`;
-      } else {
-        candidateName = `${fName} ${lName} - ${capitalizedKey} ${randNum} ${cityInfo.name}`;
-      }
-      brandSlug = slugify(candidateName.replace(/Sp\. z o\.o\.|Sp\. j\.|Dr|Studio/g, ""));
-      website = `https://${brandSlug}-${slugify(cityInfo.name)}.pl`;
-      nip = generateValidNip(cityInfo.taxPrefix);
-    }
-
-    if (isUnique) {
-      generatedItems.push({
-        companyName: candidateName,
-        city: cityInfo.name,
-        address: fullAddress,
-        phone,
-        website,
-        industry: capitalizedKey,
-        nip,
-        lat,
-        lon,
-        companyScale: scale,
-        legalForm: legal,
-        googleRating: Number((4.6 + (Math.random() * 0.3)).toFixed(1)),
-        googleReviewsCount: isSpZoo
-          ? Math.floor(85 + Math.random() * 120)
-          : Math.floor(12 + Math.random() * 45),
-      });
-    }
-  }
-
-  return generatedItems;
-}
-
 export async function POST(req: Request) {
   try {
+    await requireUser();
     const body = await req.json();
 
     // Support CSV bulk import directly
@@ -812,44 +639,34 @@ export async function POST(req: Request) {
     }
 
     // 3. Process items and verify how many were actually added
-    let result = await processItems(discoveredItems, radiusKm, `scraper_${companyScale}`, city);
+    const result = await processItems(discoveredItems, radiusKm, `scraper_${companyScale}`, city);
 
-    // 4. CRITICAL FALLBACK & DYNAMIC GENERATOR:
-    // If 0 leads were added (e.g. all were duplicates, or Google Places returned 0),
-    // automatically generate 8 fresh, non-colliding regional leads for this exact city, scale, and keyword!
-    if (result.added === 0) {
-      const freshLeads = await generateFreshRegionalLeads({
+    if (result.added === 0 && discoveredItems.length === 0) {
+      return NextResponse.json({
+        ...result,
+        googlePlacesStatus: googlePlacesStatus || "NO_RESULTS",
+        googlePlacesError,
+        sourceEngine: googlePlacesStatus === "OK" ? "google_places" : "curated_catalog",
         city,
         keyword,
         companyScale,
-        count: 8,
+        message: "Nie znaleziono nowych firm dla podanych kryteriów wyszukiwania.",
       });
-
-      if (freshLeads.length > 0) {
-        const freshResult = await processItems(freshLeads, radiusKm, `dynamic_ceidg_${companyScale}`, city);
-        result = {
-          success: true,
-          scanned: result.scanned + freshResult.scanned,
-          added: freshResult.added,
-          rejectedWroclaw: 0,
-          rejectedRadius: result.rejectedRadius + freshResult.rejectedRadius,
-          rejectedDuplicates: result.rejectedDuplicates + freshResult.rejectedDuplicates,
-          emailsScrapedTotal: result.emailsScrapedTotal + freshResult.emailsScrapedTotal,
-          addedLeads: freshResult.addedLeads,
-        };
-      }
     }
 
     return NextResponse.json({
       ...result,
-      googlePlacesStatus: googlePlacesStatus || "CEIDG_KRS_DYNAMIC",
+      googlePlacesStatus: googlePlacesStatus || "CATALOG_MATCHED",
       googlePlacesError,
-      sourceEngine: googlePlacesStatus === "OK" ? "google_places" : "ceidg_krs_dynamic",
+      sourceEngine: googlePlacesStatus === "OK" ? "google_places" : "curated_catalog",
       city,
       keyword,
       companyScale,
     });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     console.error("Scraper error:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -862,7 +679,7 @@ async function processItems(
   centerCity: string = "Legnica"
 ) {
   let addedCount = 0;
-  let rejectedWroclaw = 0;
+  const rejectedWroclaw = 0;
   let rejectedRadius = 0;
   let rejectedDuplicates = 0;
   let emailsScrapedTotal = 0;

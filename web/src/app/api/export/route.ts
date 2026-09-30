@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { db, leads } from "@/lib/db";
 import { desc, or, notIlike, isNull } from "drizzle-orm";
 import * as XLSX from "xlsx";
+import { requireUser } from "@/lib/auth";
 
 export async function GET() {
   try {
+    await requireUser();
     const allLeads = await db.query.leads.findMany({
       where: or(isNull(leads.city), notIlike(leads.city, "%wroc%")),
       orderBy: [desc(leads.score), desc(leads.id)],

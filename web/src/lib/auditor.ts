@@ -14,7 +14,48 @@ export interface AuditResult {
   socialLinks: Record<string, string>;
   emailsScraped: string[];
   metaAdsActive: boolean;
-  rawEvidence: Record<string, any>;
+  rawEvidence: Record<string, unknown>;
+}
+
+export class AuditFetchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuditFetchError";
+  }
+}
+
+/**
+ * Validates that URL is safe and does not target loopback, private networks, or cloud metadata (SSRF guard).
+ */
+export function isSafeUrl(targetUrl: string): boolean {
+  try {
+    const parsed = new URL(targetUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+
+    const hostname = parsed.hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0" ||
+      hostname === "::1" ||
+      hostname.endsWith(".local") ||
+      hostname.endsWith(".internal") ||
+      hostname.endsWith(".localhost")
+    ) {
+      return false;
+    }
+
+    // Private IPv4 ranges
+    if (/^127\./.test(hostname)) return false;
+    if (/^10\./.test(hostname)) return false;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)) return false;
+    if (/^192\.168\./.test(hostname)) return false;
+    if (/^169\.254\./.test(hostname)) return false; // AWS/GCP/Azure instance metadata
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function auditWebsite(targetUrl: string): Promise<AuditResult> {
@@ -23,13 +64,18 @@ export async function auditWebsite(targetUrl: string): Promise<AuditResult> {
     url = `https://${url}`;
   }
 
-  const evidence: Record<string, any> = {};
+  // SSRF guard
+  if (!isSafeUrl(url)) {
+    throw new AuditFetchError(`Zablokowano niebezpieczny adres URL (ochrona SSRF): ${url}`);
+  }
+
+  const evidence: Record<string, unknown> = {};
   let sslValid = false;
   let html = "";
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2500);
+    const timeoutId = setTimeout(() => controller.abort(), 3500);
 
     const res = await fetch(url, {
       signal: controller.signal,
@@ -42,52 +88,39 @@ export async function auditWebsite(targetUrl: string): Promise<AuditResult> {
 
     clearTimeout(timeoutId);
     sslValid = res.url.startsWith("https://");
-    html = await res.text();
-  } catch (err: any) {
-    // If https failed quickly, try http once with 2000ms timeout
+    if (res.ok) {
+      html = await res.text();
+    }
+  } catch (_err: unknown) {
+    // If https failed, try http once with 2500ms timeout
     if (url.startsWith("https://")) {
       try {
         const httpUrl = url.replace("https://", "http://");
-        const ctrlHttp = new AbortController();
-        const timeoutHttp = setTimeout(() => ctrlHttp.abort(), 2000);
-        const res = await fetch(httpUrl, {
-          signal: ctrlHttp.signal,
-          headers: {
-            "User-Agent": "ProcentMarketing-Auditor/2.0",
-          },
-        });
-        clearTimeout(timeoutHttp);
-        sslValid = false;
-        html = await res.text();
+        if (isSafeUrl(httpUrl)) {
+          const ctrlHttp = new AbortController();
+          const timeoutHttp = setTimeout(() => ctrlHttp.abort(), 2500);
+          const res = await fetch(httpUrl, {
+            signal: ctrlHttp.signal,
+            headers: {
+              "User-Agent": "ProcentMarketing-Auditor/2.0",
+            },
+          });
+          clearTimeout(timeoutHttp);
+          sslValid = false;
+          if (res.ok) {
+            html = await res.text();
+          }
+        }
       } catch {
         // Failed completely
       }
     }
   }
 
-  if (!html) {
-    const cleanDomain = targetUrl
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/^www\./, "")
-      .split("/")[0];
-    return {
-      sslValid: false,
-      isResponsive: false,
-      cmsDetected: "WordPress",
-      copyrightYear: new Date().getFullYear() - 2,
-      hasGa4: false,
-      hasGtm: false,
-      hasMetaPixel: false,
-      hasContactForm: true,
-      hasOnlineBooking: false,
-      hasLiveChat: false,
-      socialLinks: {},
-      emailsScraped: [`kontakt@${cleanDomain}`],
-      metaAdsActive: false,
-      rawEvidence: { note: "Strona wymaga wdrożenia analityki GA4, certyfikatu SSL oraz responsywności mobilnej" },
-    };
+  // INVARIANT 6: Zero fabricated audit findings.
+  // If the website cannot be fetched, throw an error so the lead enters 'audit_failed'.
+  if (!html || !html.trim()) {
+    throw new AuditFetchError(`Nie udało się pobrać zawartości strony WWW (${url}): timeout lub błąd serwera docelowego.`);
   }
 
   const $ = cheerio.load(html);
@@ -226,7 +259,7 @@ export async function auditWebsite(targetUrl: string): Promise<AuditResult> {
 
   // Deep Email Scraping: If no email on homepage, check /kontakt or contact link
   if (emailsSet.size === 0) {
-    let contactHref = $('a[href*="kontakt"], a[href*="contact"]').first().attr("href");
+    const contactHref = $('a[href*="kontakt"], a[href*="contact"]').first().attr("href");
     let contactTarget = "";
     if (contactHref) {
       if (contactHref.startsWith("http")) {

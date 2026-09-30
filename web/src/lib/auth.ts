@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
 import { db, users, invitations, sessions } from "@/lib/db";
-import { eq, and, gt, sql } from "drizzle-orm";
+import { eq, and, gt } from "drizzle-orm";
 
 export const SESSION_COOKIE_NAME = "pm_session_token";
 export const BOOTSTRAP_INVITE_CODE = process.env.BOOTSTRAP_INVITE_CODE || "PROCENT-START-2026";
@@ -57,7 +57,7 @@ export async function validateInviteCode(
 ): Promise<{
   valid: boolean;
   error?: string;
-  invitation?: any;
+  invitation?: typeof invitations.$inferSelect;
   role: string;
 }> {
   const trimmed = (code || "").trim();
@@ -166,6 +166,13 @@ export async function deleteSessionToken(token: string): Promise<void> {
   }
 }
 
+export class AuthenticationError extends Error {
+  constructor(message = "Wymagane uwierzytelnienie. Zaloguj się.") {
+    super(message);
+    this.name = "AuthenticationError";
+  }
+}
+
 /**
  * Get currently authenticated user in server components and route handlers
  */
@@ -179,3 +186,16 @@ export async function getCurrentUser(): Promise<SafeUser | null> {
     return null;
   }
 }
+
+/**
+ * INVARIANT 4: Authentication guard for API routes and server actions.
+ * Throws AuthenticationError if not logged in.
+ */
+export async function requireUser(): Promise<SafeUser> {
+  const user = await getCurrentUser();
+  if (!user) {
+    throw new AuthenticationError();
+  }
+  return user;
+}
+

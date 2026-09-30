@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
 import { db, leads, messages } from "@/lib/db";
 import { and, desc, eq } from "drizzle-orm";
-import { composeEmail, composeFollowupEmail, sendEmailSafely } from "@/lib/outreach";
+import { composeEmail, composeFollowupEmail } from "@/lib/outreach";
+import { requireUser } from "@/lib/auth";
+import { sendMessage } from "@/lib/send-service";
+import crypto from "crypto";
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    await requireUser();
     const { id } = await params;
     const leadId = parseInt(id, 10);
 
@@ -35,8 +39,11 @@ export async function GET(
       followupDraft = await composeFollowupEmail(lead, lead.offer, originalSent?.subject, contactName);
     }
 
-    const alreadySent = lead.status === "sent" || lead.status === "followup_sent";
-    const canSendFollowup = lead.status === "sent";
+    const outboundSent = leadMessages.filter(
+      (m) => m.direction === "outbound" && m.status === "sent"
+    );
+    const alreadySent = outboundSent.length > 0;
+    const canSendFollowup = outboundSent.length > 0 && outboundSent.length < 4 && lead.status !== "unsubscribed";
 
     return NextResponse.json({
       success: true,
@@ -46,8 +53,12 @@ export async function GET(
       followupDraft,
       alreadySent,
       canSendFollowup,
+      outboundCount: outboundSent.length,
     });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
@@ -57,6 +68,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    await requireUser();
     const { id } = await params;
     const leadId = parseInt(id, 10);
     const body = await req.json().catch(() => ({}));
@@ -80,95 +92,105 @@ export async function POST(
 
     const contactName = lead.contacts?.[0]?.firstName || null;
 
-    // --- CASE 1: SENDING FOLLOW-UP ---
+    // Check existing outbound sent messages
+    const sentMessages = await db.query.messages.findMany({
+      where: and(eq(messages.leadId, leadId), eq(messages.direction, "outbound"), eq(messages.status, "sent")),
+      orderBy: [desc(messages.createdAt)],
+    });
+
+    // 1. Prepare draft
+    let draft;
+    let inReplyTo: string | null = null;
+    let sequenceStep = 1;
+
     if (isFollowup) {
-      if (lead.status === "followup_sent") {
+      if (sentMessages.length === 0) {
         return NextResponse.json(
-          {
-            success: false,
-            error: "Follow-up został już wcześniej wysłany do tego leada (maksymalnie 1 follow-up)!",
-          },
+          { success: false, error: "Nie można wysłać follow-up bez uprzedniej wysyłki pierwszego maila." },
+          { status: 400 }
+        );
+      }
+      if (sentMessages.length >= 4) {
+        return NextResponse.json(
+          { success: false, error: "Osiągnięto limit 3 wiadomości follow-up (4 wiadomości łącznie)." },
           { status: 400 }
         );
       }
 
-      if (lead.status !== "sent") {
+      const originalSent = sentMessages[0];
+      inReplyTo = originalSent.messageId || null;
+      sequenceStep = sentMessages.length + 1;
+      draft = await composeFollowupEmail(lead, lead.offer, originalSent.subject, contactName);
+    } else {
+      if (sentMessages.length > 0) {
         return NextResponse.json(
           {
             success: false,
-            error: "Follow-up można wysłać wyłącznie do firmy, która otrzymała już pierwszy e-mail (status 'sent') i nie odpisała!",
+            error: "Wiadomość została już wcześniej wysłana do tego leada. Użyj opcji Follow-up.",
+            alreadySent: true,
           },
           { status: 400 }
         );
       }
-
-      // Find original sent message for thread chaining
-      const originalSent = await db.query.messages.findFirst({
-        where: and(eq(messages.leadId, leadId), eq(messages.direction, "outbound")),
-        orderBy: [desc(messages.createdAt)],
-      });
-
-      const draft = await composeFollowupEmail(lead, lead.offer, originalSent?.subject, contactName);
-
-      if (body.subject) draft.subject = body.subject;
-      if (body.bodyText) draft.bodyText = body.bodyText;
-
-      const sendRes = await sendEmailSafely({
-        leadId,
-        draft,
-        leadNip: lead.nip,
-        leadPhone: lead.phoneNormalized,
-        ignoreWindow: body.ignoreWindow ?? true,
-        isFollowup: true,
-        inReplyTo: originalSent?.messageId || null,
-      });
-
-      if (sendRes.success) {
-        await db
-          .update(leads)
-          .set({ status: "followup_sent", updatedAt: new Date() })
-          .where(eq(leads.id, leadId));
-      }
-
-      return NextResponse.json({ success: sendRes.success, result: sendRes, isFollowup: true });
+      draft = composeEmail(lead, lead.offer, contactName);
     }
 
-    // --- CASE 2: SENDING INITIAL OUTREACH ---
-    if (lead.status === "sent" || lead.status === "followup_sent") {
+    if (body.subject) draft.subject = body.subject;
+    if (body.bodyText) draft.bodyText = body.bodyText;
+
+    // 2. Compute idempotency key
+    const idempString = `${leadId}:${draft.subject}:${sequenceStep}:email`;
+    const idempotencyKey = crypto.createHash("sha256").update(idempString).digest("hex");
+
+    // 3. Insert message in 'scheduled' status
+    const [scheduledMsg] = await db
+      .insert(messages)
+      .values({
+        leadId,
+        direction: "outbound",
+        channel: "email",
+        status: "scheduled",
+        idempotencyKey,
+        inReplyTo: inReplyTo || undefined,
+        subject: draft.subject,
+        bodyText: draft.bodyText,
+        bodyHtml: draft.bodyHtml,
+        sequenceStep,
+        createdAt: new Date(),
+      })
+      .onConflictDoNothing()
+      .returning();
+
+    const targetMsgId = scheduledMsg
+      ? scheduledMsg.id
+      : (
+          await db.query.messages.findFirst({
+            where: eq(messages.idempotencyKey, idempotencyKey),
+          })
+        )?.id;
+
+    if (!targetMsgId) {
       return NextResponse.json(
-        {
-          success: false,
-          error: "Wiadomość została już wcześniej wysłana do tego leada! Jeśli klient nie odpowiedział, użyj przycisku 'Wyślij Follow-up'.",
-          alreadySent: true,
-        },
+        { success: false, error: "Nie udało się utworzyć rekordu wiadomości (konflikt idempotencji)." },
         { status: 400 }
       );
     }
 
-    const draft = composeEmail(lead, lead.offer, contactName);
-
-    // If custom draft was passed from UI editor
-    if (body.subject) draft.subject = body.subject;
-    if (body.bodyText) draft.bodyText = body.bodyText;
-
-    const sendRes = await sendEmailSafely({
-      leadId,
-      draft,
-      leadNip: lead.nip,
-      leadPhone: lead.phoneNormalized,
-      ignoreWindow: body.ignoreWindow ?? true,
-      isFollowup: false,
+    // 4. INVARIANT 2: Dispatch strictly via sendMessage(messageId)
+    const sendRes = await sendMessage(targetMsgId, {
+      ignoreWindow: body.ignoreWindow ?? false,
     });
 
-    if (sendRes.success) {
-      await db
-        .update(leads)
-        .set({ status: "sent", updatedAt: new Date() })
-        .where(eq(leads.id, leadId));
-    }
-
-    return NextResponse.json({ success: sendRes.success, result: sendRes, isFollowup: false });
+    return NextResponse.json({
+      success: sendRes.success,
+      result: sendRes,
+      isFollowup,
+      sequenceStep,
+    });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     console.error("Outreach error:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

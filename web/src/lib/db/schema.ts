@@ -34,6 +34,12 @@ export const leads = pgTable("leads", {
   rejectionReason: text("rejection_reason"),
   ownerConfidence: varchar("owner_confidence", { length: 50 }),
   sourceName: varchar("source_name", { length: 100 }),
+  sequenceStep: integer("sequence_step").default(0).notNull(),
+  nextActionAt: timestamp("next_action_at", { withTimezone: false }),
+  lostReason: varchar("lost_reason", { length: 100 }),
+  cooldownUntil: timestamp("cooldown_until", { withTimezone: false }),
+  contactBasis: varchar("contact_basis", { length: 50 }).default("inquiry"),
+  isFixture: boolean("is_fixture").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
 });
@@ -97,6 +103,9 @@ export const offers = pgTable("offers", {
   deployUrl: varchar("deploy_url", { length: 512 }),
   netlifyDeployId: varchar("netlify_deploy_id", { length: 100 }),
   status: varchar("status", { length: 50 }).default("draft").notNull(),
+  token: varchar("token", { length: 64 }).unique(),
+  noindex: boolean("noindex").default(true).notNull(),
+  evidenceIds: json("evidence_ids"),
   expiresAt: timestamp("expires_at", { withTimezone: false }),
   publishedAt: timestamp("published_at", { withTimezone: false }),
   createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
@@ -121,6 +130,10 @@ export const messages = pgTable("messages", {
   bodyHtml: text("body_html"),
   classification: varchar("classification", { length: 50 }),
   classificationDetails: json("classification_details"),
+  retryCount: integer("retry_count").default(0).notNull(),
+  errorMessage: text("error_message"),
+  lockedAt: timestamp("locked_at", { withTimezone: false }),
+  sequenceStep: integer("sequence_step").default(0),
   sentAt: timestamp("sent_at", { withTimezone: false }),
   createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
 });
@@ -196,6 +209,59 @@ export const appSettings = pgTable("app_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
 });
 
+export const leadEvents = pgTable("lead_events", {
+  id: serial("id").primaryKey(),
+  leadId: integer("lead_id")
+    .references(() => leads.id, { onDelete: "cascade" })
+    .notNull(),
+  fromStatus: varchar("from_status", { length: 50 }).notNull(),
+  toStatus: varchar("to_status", { length: 50 }).notNull(),
+  reason: text("reason"),
+  actor: varchar("actor", { length: 100 }).default("system").notNull(),
+  metadata: json("metadata"),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
+export const jobs = pgTable("jobs", {
+  id: serial("id").primaryKey(),
+  type: varchar("type", { length: 100 }).notNull(),
+  payload: json("payload"),
+  status: varchar("status", { length: 50 }).default("pending").notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  maxAttempts: integer("max_attempts").default(3).notNull(),
+  lastError: text("last_error"),
+  lockedAt: timestamp("locked_at", { withTimezone: false }),
+  lockedBy: varchar("locked_by", { length: 100 }),
+  runAt: timestamp("run_at", { withTimezone: false }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
+export const evidence = pgTable("evidence", {
+  id: serial("id").primaryKey(),
+  leadId: integer("lead_id")
+    .references(() => leads.id, { onDelete: "cascade" })
+    .notNull(),
+  claimType: varchar("claim_type", { length: 100 }).notNull(),
+  claimValue: text("claim_value").notNull(),
+  source: varchar("source", { length: 100 }).notNull(),
+  sourceUrl: varchar("source_url", { length: 512 }),
+  snippet: text("snippet"),
+  confidence: doublePrecision("confidence").default(1.0),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
+export const serviceCatalog = pgTable("service_catalog", {
+  id: serial("id").primaryKey(),
+  category: varchar("category", { length: 100 }).notNull(),
+  serviceName: varchar("service_name", { length: 255 }).notNull(),
+  description: text("description").notNull(),
+  basePrice: integer("base_price").notNull(),
+  priceUnit: varchar("price_unit", { length: 50 }).default("PLN").notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
 // Relations
 export const leadsRelations = relations(leads, ({ one, many }) => ({
   audit: one(audits, {
@@ -209,6 +275,22 @@ export const leadsRelations = relations(leads, ({ one, many }) => ({
   contacts: many(contacts),
   messages: many(messages),
   events: many(events),
+  leadEvents: many(leadEvents),
+  evidence: many(evidence),
+}));
+
+export const leadEventsRelations = relations(leadEvents, ({ one }) => ({
+  lead: one(leads, {
+    fields: [leadEvents.leadId],
+    references: [leads.id],
+  }),
+}));
+
+export const evidenceRelations = relations(evidence, ({ one }) => ({
+  lead: one(leads, {
+    fields: [evidence.leadId],
+    references: [leads.id],
+  }),
 }));
 
 export const auditsRelations = relations(audits, ({ one }) => ({
