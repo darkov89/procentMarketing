@@ -559,7 +559,11 @@ export default function LeadMachineDashboard() {
       const data = await res.json();
       if (data.success) {
         setScraperResult(data);
-        showToast(`Dodano ${data.added} nowych firm (${scaleLabel})! Odrzucono Wrocław: ${data.rejectedWroclaw}`);
+        if (data.added > 0) {
+          showToast(`Dodano ${data.added} nowych firm (${scaleLabel})! Zbadano: ${data.scanned}`);
+        } else {
+          showToast(`Zbadano ${data.scanned} firm (${data.rejectedDuplicates} to duplikaty w CRM).`, "info");
+        }
         fetchLeads();
       } else {
         showToast(data.error || "Błąd scrapera", "error");
@@ -795,12 +799,17 @@ export default function LeadMachineDashboard() {
           keyword: preset.keyword,
           city: preset.city,
           radiusKm: preset.radius,
+          companyScale: scraperCompanyScale,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setScraperResult(data);
-        showToast(`Preset: Dodano ${data.added} nowych firm! Odrzucono Wrocław: ${data.rejectedWroclaw}`);
+        if (data.added > 0) {
+          showToast(`Preset '${preset.title}': Dodano ${data.added} nowych firm! (Zbadano: ${data.scanned})`);
+        } else {
+          showToast(`Preset: Wszystkie firmy (${data.scanned}) znajdują się już w bazie CRM.`, "info");
+        }
         fetchLeads();
       } else {
         showToast(data.error || "Błąd presetu", "error");
