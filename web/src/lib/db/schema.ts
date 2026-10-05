@@ -11,8 +11,31 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
+export const tenants = pgTable("tenants", {
+  id: serial("id").primaryKey(),
+  slug: varchar("slug", { length: 50 }).unique().notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  plan: varchar("plan", { length: 50 }).default("pro").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
+export const tenantMembers = pgTable("tenant_members", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  userId: integer("user_id")
+    .references(() => users.id, { onDelete: "cascade" })
+    .notNull(),
+  role: varchar("role", { length: 50 }).default("owner").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
 export const leads = pgTable("leads", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
   companyName: varchar("company_name", { length: 255 }).notNull(),
   nip: varchar("nip", { length: 20 }),
   regon: varchar("regon", { length: 20 }),
@@ -46,6 +69,7 @@ export const leads = pgTable("leads", {
 
 export const contacts = pgTable("contacts", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
   leadId: integer("lead_id")
     .references(() => leads.id, { onDelete: "cascade" })
     .notNull(),
@@ -88,6 +112,7 @@ export const audits = pgTable("audits", {
 
 export const offers = pgTable("offers", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
   leadId: integer("lead_id")
     .references(() => leads.id, { onDelete: "cascade" })
     .unique()
@@ -114,6 +139,8 @@ export const offers = pgTable("offers", {
   senderWebsite: varchar("sender_website", { length: 255 }),
   customNote: text("custom_note"),
   ctaText: varchar("cta_text", { length: 100 }).default("Umów bezpłatną konsultację"),
+  viewCount: integer("view_count").default(0).notNull(),
+  lastViewedAt: timestamp("last_viewed_at", { withTimezone: false }),
   expiresAt: timestamp("expires_at", { withTimezone: false }),
   publishedAt: timestamp("published_at", { withTimezone: false }),
   createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
@@ -121,6 +148,7 @@ export const offers = pgTable("offers", {
 
 export const messages = pgTable("messages", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
   leadId: integer("lead_id")
     .references(() => leads.id, { onDelete: "cascade" })
     .notNull(),
@@ -148,6 +176,7 @@ export const messages = pgTable("messages", {
 
 export const suppression = pgTable("suppression", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
   hashedEmail: varchar("hashed_email", { length: 64 }),
   hashedPhone: varchar("hashed_phone", { length: 64 }),
   hashedNip: varchar("hashed_nip", { length: 64 }),
@@ -212,6 +241,7 @@ export const sessions = pgTable("sessions", {
 
 export const appSettings = pgTable("app_settings", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
   key: varchar("key", { length: 100 }).unique().notNull(),
   value: json("value").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
@@ -219,6 +249,7 @@ export const appSettings = pgTable("app_settings", {
 
 export const leadEvents = pgTable("lead_events", {
   id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
   leadId: integer("lead_id")
     .references(() => leads.id, { onDelete: "cascade" })
     .notNull(),
@@ -329,9 +360,28 @@ export const messagesRelations = relations(messages, ({ one }) => ({
   }),
 }));
 
+export const tenantsRelations = relations(tenants, ({ many }) => ({
+  members: many(tenantMembers),
+  leads: many(leads),
+  offers: many(offers),
+  messages: many(messages),
+}));
+
+export const tenantMembersRelations = relations(tenantMembers, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [tenantMembers.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [tenantMembers.userId],
+    references: [users.id],
+  }),
+}));
+
 export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   invitationsCreated: many(invitations),
+  memberships: many(tenantMembers),
 }));
 
 export const invitationsRelations = relations(invitations, ({ one }) => ({

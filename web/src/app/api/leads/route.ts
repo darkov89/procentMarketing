@@ -7,14 +7,17 @@ import { requireUser } from "@/lib/auth";
 
 export async function GET(req: Request) {
   try {
-    await requireUser();
+    const user = await requireUser();
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("search")?.toLowerCase();
     const city = searchParams.get("city");
     const status = searchParams.get("status");
 
-    // Fetch all leads with joined audit, offer, contacts, messages
+    const userTenantId = user.tenantId || 1;
+
+    // Fetch tenant's leads with joined audit, offer, contacts, messages
     const allLeads = await db.query.leads.findMany({
+      where: eq(leads.tenantId, userTenantId),
       orderBy: [desc(leads.score), desc(leads.id)],
       with: {
         audit: true,
@@ -79,9 +82,11 @@ export async function POST(req: Request) {
     }
 
     const normPhone = normalizePhone(phone);
+    const tenantId = user.tenantId || 1;
     const [newLead] = await db
       .insert(leads)
       .values({
+        tenantId,
         companyName,
         city: city || "Legnica",
         address,
@@ -97,6 +102,7 @@ export async function POST(req: Request) {
 
     await db.insert(leadEvents).values({
       leadId: newLead.id,
+      tenantId,
       fromStatus: "none",
       toStatus: "new",
       reason: "Ręczne dodanie leada w panelu",

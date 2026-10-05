@@ -43,6 +43,15 @@ Każdy z poniższych inwariantów jest zweryfikowany zautomatyzowanym zestawem t
 
 ---
 
+## MULTI-TENANCY & BAZA WYSŁANYCH (DECOUPLED MODULAR ARCHITECTURE)
+
+- **Izolacja danych tenanta**: Każda encja w bazie (`leads`, `contacts`, `offers`, `messages`, `suppression`, `app_settings`, `lead_events`) posiada klucz `tenant_id`. Zapytania API są twardo filtrowane przez `tenant_id` przypisany do konta użytkownika w tabeli `tenant_members`.
+- **Baza Wysłanych & Metryki (`activeTab="history"`)**: Dedykowany widok operacyjny agregujący wysłaną korespondencję (Initial + do 3 Follow-upów), statusy doręczeń oraz interakcje z ofertą.
+- **Śledzenie odsłon ofert publicznych**: Otwarcie strony `/o/[token]` natychmiastowo rejestruje wizytę (`view_count`, `last_viewed_at`) wraz ze zdarzeniem audytowym `recipient` w `lead_events`.
+- **Wskaźniki KPI czasu rzeczywistego**: Panel kalkuluje kluczowe miary: Wysłane Kontakty, Odsłony Ofert (/o/[token]) wraz z View Rate %, Wskaźnik Odpowiedzi (Reply Rate %) z IMAP oraz Umówione Spotkania B2B.
+
+---
+
 ## DOKUMENTACJA POWIĄZANA
 
 - `docs/ARCHITECTURE_V2.md` — Pełna specyfikacja architektury technicznej 2.0.

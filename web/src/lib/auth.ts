@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
-import { db, users, invitations, sessions } from "@/lib/db";
+import { db, users, invitations, sessions, tenants, tenantMembers } from "@/lib/db";
 import { eq, and, gt } from "drizzle-orm";
 
 export const SESSION_COOKIE_NAME = "pm_session_token";
@@ -11,6 +11,9 @@ export interface SafeUser {
   email: string;
   name: string;
   role: string;
+  tenantId?: number;
+  tenantSlug?: string;
+  tenantName?: string;
   createdAt?: Date;
 }
 
@@ -141,11 +144,41 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
     if (result.length === 0) return null;
 
     const user = result[0];
+
+    // Resolve tenant membership
+    let tenantInfo = {
+      tenantId: 1,
+      tenantSlug: "procent-marketing",
+      tenantName: "Procent Marketing",
+    };
+
+    try {
+      const membership = await db
+        .select({
+          tenantId: tenants.id,
+          tenantSlug: tenants.slug,
+          tenantName: tenants.name,
+        })
+        .from(tenantMembers)
+        .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
+        .where(eq(tenantMembers.userId, user.id))
+        .limit(1);
+
+      if (membership.length > 0) {
+        tenantInfo = membership[0];
+      }
+    } catch {
+      // Fallback to default tenant
+    }
+
     return {
       id: user.id,
       email: user.email,
       name: user.name,
       role: user.role,
+      tenantId: tenantInfo.tenantId,
+      tenantSlug: tenantInfo.tenantSlug,
+      tenantName: tenantInfo.tenantName,
       createdAt: user.createdAt,
     };
   } catch (err) {

@@ -1,4 +1,4 @@
-import { db, offers, evidence } from "@/lib/db";
+import { db, offers, evidence, leadEvents } from "@/lib/db";
 import { eq, or } from "drizzle-orm";
 import { renderOfferPage } from "@/lib/html-renderer";
 import { notFound } from "next/navigation";
@@ -61,6 +61,29 @@ export default async function SecureOfferPage({
         </div>
       </div>
     );
+  }
+
+  // Track recipient interaction / offer page view
+  try {
+    await db
+      .update(offers)
+      .set({
+        viewCount: (offer.viewCount || 0) + 1,
+        lastViewedAt: new Date(),
+      })
+      .where(eq(offers.id, offer.id));
+
+    await db.insert(leadEvents).values({
+      leadId: offer.leadId,
+      tenantId: offer.tenantId || 1,
+      fromStatus: offer.lead.status,
+      toStatus: offer.lead.status,
+      reason: `Klient otworzył stronę oferty (/o/${token}) - wyświetlenie #${(offer.viewCount || 0) + 1}`,
+      actor: "recipient",
+      metadata: { token, viewNumber: (offer.viewCount || 0) + 1 },
+    });
+  } catch (trackErr) {
+    console.error("Track view error:", trackErr);
   }
 
   const offerContent = {

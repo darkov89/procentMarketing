@@ -42,6 +42,11 @@ import {
   Sliders,
   Target,
   MapPin,
+  History,
+  BarChart3,
+  TrendingUp,
+  Calendar,
+  Award,
 } from "lucide-react";
 
 interface LeadItem {
@@ -123,7 +128,7 @@ export default function LeadMachineDashboard() {
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [activeTab, setActiveTab] = useState<"crm" | "generator" | "outreach" | "review" | "import" | "settings" | "team">("crm");
+  const [activeTab, setActiveTab] = useState<"crm" | "generator" | "outreach" | "history" | "review" | "import" | "settings" | "team">("crm");
 
   // Batch Outreach & AI Act Human Oversight state
   const [selectedOutreachIds, setSelectedOutreachIds] = useState<number[]>([]);
@@ -132,8 +137,35 @@ export default function LeadMachineDashboard() {
   const [inlineEmailInput, setInlineEmailInput] = useState<{ [leadId: number]: string }>({});
   const [outreachSearch, setOutreachSearch] = useState("");
 
+  // Outreach History & Multi-tenant Metrics state
+  const [historyList, setHistoryList] = useState<any[]>([]);
+  const [historyMetrics, setHistoryMetrics] = useState<{
+    totalOutreached: number;
+    totalMessagesSent: number;
+    totalOfferViews: number;
+    leadsWithOfferViews: number;
+    offerViewRate: number;
+    repliesCount: number;
+    replyRate: number;
+    meetingsBookedCount: number;
+    meetingRate: number;
+  } | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historySearch, setHistorySearch] = useState("");
+  const [historyStatusFilter, setHistoryStatusFilter] = useState("all");
+  const [selectedHistoryItem, setSelectedHistoryItem] = useState<any | null>(null);
+  const [activeMessageIndex, setActiveMessageIndex] = useState(0);
+
   // Auth & Team state
-  const [currentUser, setCurrentUser] = useState<{ id: number; email: string; name: string; role: string } | null>(null);
+  const [currentUser, setCurrentUser] = useState<{
+    id: number;
+    email: string;
+    name: string;
+    role: string;
+    tenantId?: number;
+    tenantSlug?: string;
+    tenantName?: string;
+  } | null>(null);
   const [invitationsList, setInvitationsList] = useState<any[]>([]);
   const [teamUsersList, setTeamUsersList] = useState<any[]>([]);
   const [bootstrapCode, setBootstrapCode] = useState<string>("");
@@ -377,6 +409,23 @@ export default function LeadMachineDashboard() {
     } catch {}
   };
 
+  // Fetch Outreach History & Multi-tenant Metrics
+  const fetchOutreachHistory = async () => {
+    setHistoryLoading(true);
+    try {
+      const res = await fetch("/api/outreach/history");
+      const data = await res.json();
+      if (data.success) {
+        setHistoryList(data.history || []);
+        setHistoryMetrics(data.metrics || null);
+      }
+    } catch (err) {
+      console.error("Failed to fetch outreach history:", err);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   // Logout handler
   const handleLogout = async () => {
     try {
@@ -440,11 +489,14 @@ export default function LeadMachineDashboard() {
     fetchLeads();
     fetchCurrentUser();
     fetchSettings();
+    fetchOutreachHistory();
   }, []);
 
   useEffect(() => {
     if (activeTab === "team") {
       fetchTeamData();
+    } else if (activeTab === "history") {
+      fetchOutreachHistory();
     }
   }, [activeTab]);
 
@@ -495,6 +547,33 @@ export default function LeadMachineDashboard() {
       return matchesSearch && matchesCity && matchesStatus;
     });
   }, [leads, search, cityFilter, statusFilter]);
+
+  // Filtered Outreach History
+  const filteredHistory = useMemo(() => {
+    return historyList.filter((item) => {
+      const q = historySearch.toLowerCase();
+      const matchesSearch =
+        !historySearch ||
+        item.companyName.toLowerCase().includes(q) ||
+        (item.city && item.city.toLowerCase().includes(q)) ||
+        (item.industry && item.industry.toLowerCase().includes(q)) ||
+        (item.recipientEmail && item.recipientEmail.toLowerCase().includes(q)) ||
+        (item.contactName && item.contactName.toLowerCase().includes(q));
+
+      const matchesStatus =
+        historyStatusFilter === "all" ||
+        (historyStatusFilter === "viewed" && (item.offer?.viewCount || 0) > 0) ||
+        (historyStatusFilter === "replied" &&
+          ["replied_interested", "replied_question", "replied_negative", "meeting_booked", "won"].includes(
+            item.status
+          )) ||
+        (historyStatusFilter === "meeting" && ["meeting_booked", "won"].includes(item.status)) ||
+        (historyStatusFilter === "in_sequence" && ["in_sequence", "followup_sent"].includes(item.status)) ||
+        item.status === historyStatusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [historyList, historySearch, historyStatusFilter]);
 
   // Cities list
   const cities = useMemo(() => {
@@ -1339,6 +1418,13 @@ export default function LeadMachineDashboard() {
 
           {/* Badges & Mode indicators */}
           <div className="flex items-center gap-3">
+            {currentUser?.tenantName && (
+              <div className="flex items-center gap-1.5 bg-[#141C2E] border border-[#38BDF8]/40 text-[#38BDF8] px-3 py-1.5 rounded-full text-xs font-bold shadow-sm">
+                <Building size={13} className="text-[#38BDF8]" />
+                <span className="text-[10px] text-[#94A3B8] font-normal uppercase hidden md:inline">TENANT:</span>
+                <span>{currentUser.tenantName}</span>
+              </div>
+            )}
             <div className="hidden sm:flex items-center gap-2 bg-[#141C2E] border border-[#28354D] px-3 py-1.5 rounded-full text-xs">
               <span className="pulse-dot"></span>
               <span className="font-bold text-[#A5B4FC]">AUTONOMOUS AI: ON</span>
@@ -1398,6 +1484,12 @@ export default function LeadMachineDashboard() {
                     <span className="truncate max-w-[130px]">{currentUser.email}</span>
                     <span>•</span>
                     <span className="text-[#FFE600] font-bold uppercase">{currentUser.role}</span>
+                    {currentUser.tenantName && (
+                      <>
+                        <span>•</span>
+                        <span className="text-[#38BDF8] font-bold">{currentUser.tenantName}</span>
+                      </>
+                    )}
                   </div>
                 </div>
                 <button
@@ -1539,6 +1631,22 @@ export default function LeadMachineDashboard() {
             {pendingApprovalLeads.length > 0 && (
               <span className="bg-[#FFE600] text-black text-[10px] font-black px-2 py-0.5 rounded-full">
                 {pendingApprovalLeads.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab("history")}
+            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all relative ${
+              activeTab === "history"
+                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
+                : "text-[#94A3B8] hover:text-white"
+            }`}
+          >
+            <History size={16} />
+            <span>Baza Wysłanych & Metryki</span>
+            {historyMetrics && historyMetrics.totalOutreached > 0 && (
+              <span className="bg-[#38BDF8]/20 text-[#38BDF8] border border-[#38BDF8]/40 text-[10px] font-black px-2 py-0.5 rounded-full">
+                {historyMetrics.totalOutreached}
               </span>
             )}
           </button>
@@ -2553,6 +2661,382 @@ export default function LeadMachineDashboard() {
                   })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB: OUTREACH HISTORY & TENANT METRICS */}
+        {activeTab === "history" && (
+          <div className="space-y-6">
+            {/* Header & Tenant Isolation Context */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-lg">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="bg-[#38BDF8]/20 border border-[#38BDF8]/40 text-[#38BDF8] text-[10px] font-black uppercase px-2 py-0.5 rounded tracking-wider flex items-center gap-1">
+                    <Building size={11} />
+                    TENANT: {currentUser?.tenantName || "Procent Marketing"}
+                  </span>
+                  <span className="text-xs text-[#34D399] font-bold flex items-center gap-1">
+                    <ShieldCheck size={13} />
+                    Izolacja Danych Postgres
+                  </span>
+                </div>
+                <h2 className="text-xl font-black text-white mt-1 flex items-center gap-2">
+                  <History className="text-[#FFE600]" size={22} />
+                  Baza Wysłanych Kontaktów & Metryki Kampanii
+                </h2>
+                <p className="text-xs text-[#94A3B8] mt-0.5">
+                  Dedykowana baza kontaktów, do których wysłano ofertę lub follow-up. Śledzenie w czasie rzeczywistym odsłon stron <code className="text-[#FFE600] font-mono">/o/[token]</code>, wskaźnika odpowiedzi IMAP oraz spotkań B2B.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={fetchOutreachHistory}
+                  disabled={historyLoading}
+                  className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  title="Odśwież historię wysyłek i odsłon z bazy Neon"
+                >
+                  <RefreshCw size={14} className={historyLoading ? "animate-spin text-[#FFE600]" : "text-[#94A3B8]"} />
+                  <span>{historyLoading ? "Pobieranie..." : "Odśwież Historię"}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 4 PRIMARY KPI METRIC CARDS */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Card 1: Total Outreached Contacts */}
+              <div className="bg-[#141C2E] border border-[#28354D] p-4 rounded-xl relative overflow-hidden group hover:border-[#38BDF8]/50 transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-[#94A3B8] flex items-center gap-1.5">
+                    <Users size={14} className="text-[#38BDF8]" />
+                    Wysłane Kontakty
+                  </span>
+                  <span className="text-[10px] bg-[#1E293B] border border-[#334155] text-[#94A3B8] font-bold px-2 py-0.5 rounded-full">
+                    {historyMetrics?.totalMessagesSent ?? 0} maili łącznie
+                  </span>
+                </div>
+                <div className="text-3xl font-black text-white mt-2">
+                  {historyMetrics?.totalOutreached ?? 0}
+                </div>
+                <p className="text-[11px] text-[#64748B] mt-1">
+                  Firmy z co najmniej 1 wysłaną wiadomością
+                </p>
+              </div>
+
+              {/* Card 2: Offer Views & View Rate */}
+              <div className="bg-[#141C2E] border border-[#28354D] p-4 rounded-xl relative overflow-hidden group hover:border-[#38BDF8]/50 transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-[#38BDF8] flex items-center gap-1.5">
+                    <Eye size={14} className="text-[#38BDF8]" />
+                    Odsłony Ofert (/o/[token])
+                  </span>
+                  <span className="text-[10px] bg-[#38BDF8]/20 border border-[#38BDF8]/40 text-[#38BDF8] font-black px-2 py-0.5 rounded-full">
+                    {historyMetrics?.offerViewRate ?? 0}% wskaźnik otwarć
+                  </span>
+                </div>
+                <div className="text-3xl font-black text-[#38BDF8] mt-2 flex items-baseline gap-2">
+                  <span>{historyMetrics?.totalOfferViews ?? 0}</span>
+                  <span className="text-xs text-[#94A3B8] font-normal">odsłon</span>
+                </div>
+                <p className="text-[11px] text-[#64748B] mt-1">
+                  {historyMetrics?.leadsWithOfferViews ?? 0} firm weszło na stronę swojej oferty
+                </p>
+              </div>
+
+              {/* Card 3: Reply Rate */}
+              <div className="bg-[#141C2E] border border-[#28354D] p-4 rounded-xl relative overflow-hidden group hover:border-[#34D399]/50 transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-[#34D399] flex items-center gap-1.5">
+                    <MessageSquare size={14} className="text-[#34D399]" />
+                    Wskaźnik Odpowiedzi
+                  </span>
+                  <span className="text-[10px] bg-[#064E3B] border border-[#059669] text-[#34D399] font-black px-2 py-0.5 rounded-full">
+                    {historyMetrics?.repliesCount ?? 0} odpowiedzi
+                  </span>
+                </div>
+                <div className="text-3xl font-black text-[#34D399] mt-2">
+                  {historyMetrics?.replyRate ?? 0}%
+                </div>
+                <p className="text-[11px] text-[#64748B] mt-1">
+                  Wykryte odpowiedzi z odpytywania IMAP
+                </p>
+              </div>
+
+              {/* Card 4: Meetings Booked (Primary Goal) */}
+              <div className="bg-[#141C2E] border-2 border-[#FFE600]/60 p-4 rounded-xl relative overflow-hidden group hover:border-[#FFE600] transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase tracking-wider text-[#FFE600] flex items-center gap-1.5">
+                    <Award size={14} className="text-[#FFE600]" />
+                    Umówione Spotkania (KPI)
+                  </span>
+                  <span className="text-[10px] bg-[#FFE600] text-black font-black px-2 py-0.5 rounded-full">
+                    {historyMetrics?.meetingRate ?? 0}% konwersji
+                  </span>
+                </div>
+                <div className="text-3xl font-black text-[#FFE600] mt-2">
+                  {historyMetrics?.meetingsBookedCount ?? 0}
+                </div>
+                <p className="text-[11px] text-[#94A3B8] mt-1">
+                  Główna miara biznesowa sukcesu systemu
+                </p>
+              </div>
+            </div>
+
+            {/* Filter and Search Bar */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#94A3B8]" />
+                <input
+                  type="text"
+                  placeholder="Filtruj historię po firmie, emailu, mieście, osobie kontaktowej..."
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  className="w-full bg-[#0E1422] border border-[#28354D] rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-[#64748B] focus:outline-none focus:border-[#FFE600]"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-[#94A3B8] font-bold">Filtruj:</span>
+                {[
+                  { id: "all", label: `Wszystkie (${historyList.length})` },
+                  { id: "viewed", label: `Odsłony > 0 (${historyList.filter((h) => (h.offer?.viewCount || 0) > 0).length})` },
+                  { id: "replied", label: `Odpowiedzi (${historyList.filter((h) => ["replied_interested", "replied_question", "replied_negative", "meeting_booked", "won"].includes(h.status)).length})` },
+                  { id: "meeting", label: `Spotkania (${historyList.filter((h) => ["meeting_booked", "won"].includes(h.status)).length})` },
+                  { id: "in_sequence", label: `W sekwencji (${historyList.filter((h) => ["in_sequence", "followup_sent"].includes(h.status)).length})` },
+                ].map((pill) => (
+                  <button
+                    key={pill.id}
+                    onClick={() => setHistoryStatusFilter(pill.id)}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      historyStatusFilter === pill.id
+                        ? "bg-[#FFE600] text-black font-extrabold"
+                        : "bg-[#1E293B] text-[#94A3B8] hover:text-white hover:bg-[#2D3D58]"
+                    }`}
+                  >
+                    {pill.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Outreach Table */}
+            <div className="bg-[#141C2E] border border-[#28354D] rounded-xl overflow-hidden shadow-xl">
+              {historyLoading ? (
+                <div className="py-20 text-center">
+                  <RefreshCw size={28} className="animate-spin text-[#FFE600] mx-auto mb-3" />
+                  <p className="text-sm text-[#94A3B8]">Ładowanie bazy wysłanych kontaktów i metryk z Neon...</p>
+                </div>
+              ) : filteredHistory.length === 0 ? (
+                <div className="py-20 text-center px-4">
+                  <div className="w-14 h-14 bg-[#1E293B] border border-[#28354D] rounded-2xl flex items-center justify-center mx-auto mb-3 text-[#94A3B8]">
+                    <Inbox size={26} />
+                  </div>
+                  <h3 className="text-base font-extrabold text-white">Brak rekordów wysyłki</h3>
+                  <p className="text-xs text-[#94A3B8] max-w-md mx-auto mt-1">
+                    {historySearch || historyStatusFilter !== "all"
+                      ? "Żaden rekord nie pasuje do wybranych filtrów."
+                      : "Nie wysłano jeszcze żadnych ofert z tej przestrzeni tenanta. Przejdź do zakładki 'Zatwierdzanie Ofert & Wysyłka', aby zatwierdzić i wysłać pierwsze maile."}
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm border-collapse">
+                    <thead>
+                      <tr className="bg-[#0E1422] border-b border-[#28354D] text-[11px] font-black uppercase tracking-wider text-[#94A3B8]">
+                        <th className="py-3 px-4">Firma & Miasto</th>
+                        <th className="py-3 px-4">Odbiorca & Kontakt</th>
+                        <th className="py-3 px-4">Status & Sekwencja</th>
+                        <th className="py-3 px-4">Interakcja z Ofertą (/o/[token])</th>
+                        <th className="py-3 px-4">Wysłane Wiadomości</th>
+                        <th className="py-3 px-4 text-right">Akcje</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#1E293B]">
+                      {filteredHistory.map((item) => {
+                        const offerViewCount = item.offer?.viewCount || 0;
+                        const hasViewed = offerViewCount > 0;
+                        const offerUrl = item.offer?.token ? `/o/${item.offer.token}` : null;
+
+                        return (
+                          <tr key={item.leadId} className="hover:bg-[#1A2338]/60 transition-colors">
+                            {/* Firma & Miasto */}
+                            <td className="py-3.5 px-4">
+                              <div className="font-extrabold text-white text-sm flex items-center gap-1.5">
+                                <span>{item.companyName}</span>
+                              </div>
+                              <div className="text-xs text-[#94A3B8] flex items-center gap-2 mt-0.5">
+                                <span className="flex items-center gap-1">
+                                  <MapPin size={11} className="text-[#FFE600]" />
+                                  {item.city}
+                                </span>
+                                <span>•</span>
+                                <span className="text-[#64748B]">{item.industry}</span>
+                              </div>
+                            </td>
+
+                            {/* Odbiorca & Kontakt */}
+                            <td className="py-3.5 px-4">
+                              <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                                <User size={12} className="text-[#94A3B8]" />
+                                <span>{item.contactName}</span>
+                              </div>
+                              <div className="text-xs text-[#38BDF8] font-mono mt-0.5 flex items-center gap-1">
+                                <Mail size={11} />
+                                <span>{item.recipientEmail}</span>
+                              </div>
+                            </td>
+
+                            {/* Status & Sekwencja */}
+                            <td className="py-3.5 px-4">
+                              <div className="flex flex-col gap-1 items-start">
+                                {item.status === "meeting_booked" ? (
+                                  <span className="bg-[#FFE600] text-black text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
+                                    <Award size={10} /> SPOTKANIE UMÓWIONE
+                                  </span>
+                                ) : item.status === "won" ? (
+                                  <span className="bg-emerald-500 text-black text-[10px] font-black px-2 py-0.5 rounded-full">
+                                    🏆 KLIENT POZYSKANY
+                                  </span>
+                                ) : item.status === "replied_interested" ? (
+                                  <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                    💬 ZAINTERESOWANY
+                                  </span>
+                                ) : item.status === "replied_question" ? (
+                                  <span className="bg-amber-500/20 text-amber-400 border border-amber-500/40 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                    ❓ PYTANIE KLIENTA
+                                  </span>
+                                ) : item.status === "in_sequence" || item.status === "followup_sent" ? (
+                                  <span className="bg-[#A855F7]/20 text-[#C084FC] border border-[#A855F7]/40 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                    SEKWENCJA (KROK {item.sequenceStep || 1}/3)
+                                  </span>
+                                ) : item.status === "sent" ? (
+                                  <span className="bg-[#38BDF8]/20 text-[#38BDF8] border border-[#38BDF8]/40 text-[10px] font-black px-2 py-0.5 rounded-full">
+                                    OFERTA WYSŁANA
+                                  </span>
+                                ) : item.status === "lost" ? (
+                                  <span className="bg-rose-500/20 text-rose-400 border border-rose-500/40 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                    BRAK REAKCJI (LOST)
+                                  </span>
+                                ) : (
+                                  <span className="bg-[#1E293B] text-[#94A3B8] border border-[#334155] text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
+                                    {item.status}
+                                  </span>
+                                )}
+
+                                <span className="text-[10px] text-[#64748B]">
+                                  {item.latestSentAt
+                                    ? `Ostatnio: ${new Date(item.latestSentAt).toLocaleDateString("pl-PL")}`
+                                    : "—"}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* Interakcja z Ofertą */}
+                            <td className="py-3.5 px-4">
+                              {item.offer ? (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    {hasViewed ? (
+                                      <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
+                                        <Eye size={10} />
+                                        {offerViewCount} {offerViewCount === 1 ? "ODSŁONA" : "ODSŁONY"}
+                                      </span>
+                                    ) : (
+                                      <span className="bg-[#1E293B] text-[#64748B] text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                        0 odsłon
+                                      </span>
+                                    )}
+                                  </div>
+                                  {item.offer.lastViewedAt ? (
+                                    <div className="text-[10px] text-emerald-300 font-medium">
+                                      Ostatnio: {new Date(item.offer.lastViewedAt).toLocaleString("pl-PL")}
+                                    </div>
+                                  ) : (
+                                    <div className="text-[10px] text-[#64748B]">
+                                      Oczekiwanie na kliknięcie linku
+                                    </div>
+                                  )}
+                                  {item.offer.token && (
+                                    <div className="text-[10px] text-[#38BDF8] font-mono truncate max-w-[180px]">
+                                      /o/{item.offer.token.substring(0, 16)}...
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-[#64748B] italic">Brak oferty</span>
+                              )}
+                            </td>
+
+                            {/* Wysłane Wiadomości */}
+                            <td className="py-3.5 px-4">
+                              <div className="space-y-1">
+                                <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                                  <Mail size={12} className="text-[#A5B4FC]" />
+                                  <span>{item.totalSent} {item.totalSent === 1 ? "wiadomość" : "wiadomości"}</span>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {(item.messages || []).map((m: any, idx: number) => (
+                                    <span
+                                      key={m.id || idx}
+                                      className="text-[9px] bg-[#1E293B] border border-[#334155] text-[#94A3B8] px-1.5 py-0.5 rounded font-mono"
+                                      title={m.subject || "Wiadomość"}
+                                    >
+                                      {m.sequenceStep === 0 ? "Initial" : `FU${m.sequenceStep}`}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </td>
+
+                            {/* Akcje */}
+                            <td className="py-3.5 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => {
+                                    setSelectedHistoryItem(item);
+                                    setActiveMessageIndex(0);
+                                  }}
+                                  className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white hover:text-[#FFE600] text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                                  title="Zobacz treść wysłanych maili"
+                                >
+                                  <Mail size={13} />
+                                  <span className="hidden sm:inline">Treść Maila</span>
+                                </button>
+
+                                {offerUrl && (
+                                  <>
+                                    <button
+                                      onClick={() => {
+                                        const fullUrl = `${window.location.origin}${offerUrl}`;
+                                        navigator.clipboard.writeText(fullUrl);
+                                        showToast("Skopiowano bezpośredni link do oferty!");
+                                      }}
+                                      className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-[#94A3B8] hover:text-white p-1.5 rounded-lg transition-all cursor-pointer"
+                                      title="Kopiuj link do dedykowanej oferty /o/[token]"
+                                    >
+                                      <Copy size={13} />
+                                    </button>
+                                    <a
+                                      href={offerUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8]/40 text-[#38BDF8] hover:text-white p-1.5 rounded-lg transition-all cursor-pointer"
+                                      title="Otwórz stronę oferty w nowej karcie"
+                                    >
+                                      <ExternalLink size={13} />
+                                    </a>
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -4449,6 +4933,195 @@ export default function LeadMachineDashboard() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PODGLĄD WYSŁANEJ WIADOMOŚCI & HISTORIA KONTAKTU */}
+      {selectedHistoryItem && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="max-w-2xl w-full bg-[#101726] border border-[#28354D] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="bg-[#141C2E] border-b border-[#28354D] p-5 flex items-center justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="bg-[#FFE600] text-black text-[10px] font-black uppercase px-2 py-0.5 rounded">
+                    Baza Wysłanych
+                  </span>
+                  <span className="text-xs text-[#94A3B8] font-bold">
+                    ID #{selectedHistoryItem.leadId}
+                  </span>
+                </div>
+                <h3 className="text-lg font-black text-white mt-1">
+                  {selectedHistoryItem.companyName}
+                </h3>
+                <p className="text-xs text-[#38BDF8] font-mono mt-0.5">
+                  Do: {selectedHistoryItem.recipientEmail} ({selectedHistoryItem.contactName})
+                </p>
+              </div>
+
+              <button
+                onClick={() => setSelectedHistoryItem(null)}
+                className="text-[#94A3B8] hover:text-white p-2 rounded-lg hover:bg-[#1E293B] transition-all cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Message Step Tabs (if multiple messages exist) */}
+            {selectedHistoryItem.messages && selectedHistoryItem.messages.length > 1 && (
+              <div className="bg-[#0E1422] border-b border-[#28354D] px-5 py-2 flex items-center gap-2 overflow-x-auto">
+                {selectedHistoryItem.messages.map((m: any, idx: number) => (
+                  <button
+                    key={m.id || idx}
+                    onClick={() => setActiveMessageIndex(idx)}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+                      activeMessageIndex === idx
+                        ? "bg-[#FFE600] text-black font-extrabold"
+                        : "bg-[#1E293B] text-[#94A3B8] hover:text-white"
+                    }`}
+                  >
+                    {m.sequenceStep === 0 ? "Wiadomość Główna" : `Follow-up ${m.sequenceStep}`}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Modal Body */}
+            <div className="p-5 overflow-y-auto space-y-4 flex-1">
+              {(() => {
+                const currentMsg =
+                  selectedHistoryItem.messages?.[activeMessageIndex] ||
+                  selectedHistoryItem.messages?.[0] ||
+                  null;
+
+                if (!currentMsg) {
+                  return (
+                    <p className="text-sm text-[#94A3B8] italic py-8 text-center">
+                      Brak zapisanego rekordu treści wiadomości w bazie.
+                    </p>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    {/* Message Meta */}
+                    <div className="bg-[#141C2E] border border-[#28354D] p-3 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div>
+                        <span className="text-[#94A3B8]">Wysłano: </span>
+                        <strong className="text-white">
+                          {currentMsg.sentAt
+                            ? new Date(currentMsg.sentAt).toLocaleString("pl-PL")
+                            : currentMsg.createdAt
+                            ? new Date(currentMsg.createdAt).toLocaleString("pl-PL")
+                            : "—"}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="text-[#94A3B8]">Status: </span>
+                        <strong className="text-emerald-400 uppercase font-mono">{currentMsg.status}</strong>
+                      </div>
+                      <div>
+                        <span className="text-[#94A3B8]">Krok sekwencji: </span>
+                        <strong className="text-[#FFE600]">
+                          {currentMsg.sequenceStep === 0 ? "Inicjalny (0)" : `Follow-up (${currentMsg.sequenceStep})`}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {/* Subject */}
+                    <div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#94A3B8]">
+                        Temat wiadomości
+                      </span>
+                      <div className="text-sm font-extrabold text-white mt-1 p-2.5 bg-[#0E1422] border border-[#28354D] rounded-lg">
+                        {currentMsg.subject || "(Brak tematu)"}
+                      </div>
+                    </div>
+
+                    {/* Body */}
+                    <div>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#94A3B8]">
+                        Treść wysłanego e-maila
+                      </span>
+                      <div className="mt-1 p-4 bg-[#0A0E17] border border-[#1E293B] rounded-xl text-xs font-mono text-[#CBD5E1] whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto">
+                        {currentMsg.bodyText || "(Pusta treść)"}
+                      </div>
+                    </div>
+
+                    {/* Associated Offer Link Info */}
+                    {selectedHistoryItem.offer && (
+                      <div className="bg-[#141C2E] border border-[#38BDF8]/40 p-3.5 rounded-xl flex items-center justify-between gap-3">
+                        <div>
+                          <div className="text-[11px] font-bold text-[#38BDF8] flex items-center gap-1.5">
+                            <Eye size={13} />
+                            Dedykowana Strona Oferty (/o/[token])
+                          </div>
+                          <div className="text-xs text-white font-extrabold mt-0.5">
+                            {selectedHistoryItem.offer.title || "Oferta automatyzacji i pozyskiwania klientów"}
+                          </div>
+                          <div className="text-[11px] text-[#94A3B8] mt-0.5">
+                            Liczba odsłon: <strong className="text-emerald-400">{selectedHistoryItem.offer.viewCount || 0}</strong>
+                            {selectedHistoryItem.offer.lastViewedAt && (
+                              <span> • Ostatnia: {new Date(selectedHistoryItem.offer.lastViewedAt).toLocaleString("pl-PL")}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        {selectedHistoryItem.offer.token && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                const fullUrl = `${window.location.origin}/o/${selectedHistoryItem.offer.token}`;
+                                navigator.clipboard.writeText(fullUrl);
+                                showToast("Skopiowano link oferty do schowka!");
+                              }}
+                              className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <Copy size={13} /> Kopiuj link
+                            </button>
+                            <a
+                              href={`/o/${selectedHistoryItem.offer.token}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="bg-[#FFE600] hover:bg-[#FFF04D] text-black text-xs font-black px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                            >
+                              <ExternalLink size={13} /> Otwórz
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-[#141C2E] border-t border-[#28354D] p-4 flex items-center justify-between">
+              <button
+                onClick={() => {
+                  const currentMsg =
+                    selectedHistoryItem.messages?.[activeMessageIndex] ||
+                    selectedHistoryItem.messages?.[0];
+                  if (currentMsg) {
+                    navigator.clipboard.writeText(`Temat: ${currentMsg.subject}\n\n${currentMsg.bodyText}`);
+                    showToast("Skopiowano temat i treść do schowka!");
+                  }
+                }}
+                className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer"
+              >
+                <Copy size={14} />
+                Kopiuj Treść Maila
+              </button>
+
+              <button
+                onClick={() => setSelectedHistoryItem(null)}
+                className="bg-[#FFE600] hover:bg-[#FFF04D] text-black text-xs font-black px-5 py-2 rounded-lg cursor-pointer"
+              >
+                Zamknij
+              </button>
+            </div>
           </div>
         </div>
       )}
