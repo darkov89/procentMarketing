@@ -19,9 +19,9 @@ export async function POST(req: Request) {
         with: { offer: true, contacts: true, messages: true },
       });
     } else {
-      // Find all leads that are approved or offer_ready / offer_published and have an offer
+      // Find all leads that are approved or pending_approval / offer_ready and have an offer
       targetLeads = await db.query.leads.findMany({
-        where: inArray(leads.status, ["approved", "offer_ready", "offer_published"]),
+        where: inArray(leads.status, ["approved", "pending_approval", "offer_ready", "offer_published"]),
         with: { offer: true, contacts: true, messages: true },
       });
     }
