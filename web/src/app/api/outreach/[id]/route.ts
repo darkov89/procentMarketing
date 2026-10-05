@@ -33,17 +33,18 @@ export async function GET(
     let initialDraft = null;
     let followupDraft = null;
 
-    if (lead.offer) {
-      initialDraft = composeEmail(lead, lead.offer, contactName);
-      const originalSent = leadMessages.find((m) => m.direction === "outbound");
-      followupDraft = await composeFollowupEmail(lead, lead.offer, originalSent?.subject, contactName);
-    }
-
     const outboundSent = leadMessages.filter(
       (m) => m.direction === "outbound" && m.status === "sent"
     );
     const alreadySent = outboundSent.length > 0;
     const canSendFollowup = outboundSent.length > 0 && outboundSent.length < 4 && lead.status !== "unsubscribed";
+
+    if (lead.offer) {
+      initialDraft = composeEmail(lead, lead.offer, contactName);
+      const originalSent = leadMessages.find((m) => m.direction === "outbound");
+      const nextStepNumber = Math.min(3, Math.max(1, outboundSent.length));
+      followupDraft = await composeFollowupEmail(lead, lead.offer, originalSent?.subject, contactName, nextStepNumber);
+    }
 
     return NextResponse.json({
       success: true,
@@ -120,7 +121,8 @@ export async function POST(
       const originalSent = sentMessages[0];
       inReplyTo = originalSent.messageId || null;
       sequenceStep = sentMessages.length + 1;
-      draft = await composeFollowupEmail(lead, lead.offer, originalSent.subject, contactName);
+      const stepNumber = Math.min(3, Math.max(1, sentMessages.length));
+      draft = await composeFollowupEmail(lead, lead.offer, originalSent.subject, contactName, stepNumber);
     } else {
       if (sentMessages.length > 0) {
         return NextResponse.json(

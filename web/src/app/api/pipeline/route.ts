@@ -27,8 +27,10 @@ export async function POST(req: Request) {
       errors: [] as string[],
     };
 
+    const userTenantId = user.tenantId || 1;
+
     const allLeads = await db.query.leads.findMany({
-      where: or(isNull(leads.city), notIlike(leads.city, "%wroc%")),
+      where: eq(leads.tenantId, userTenantId),
       with: { audit: true, offer: true, contacts: true, messages: true },
     });
 

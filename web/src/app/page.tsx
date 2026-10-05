@@ -24,6 +24,9 @@ import {
   FileSpreadsheet,
   Settings as SettingsIcon,
   ChevronRight,
+  ChevronLeft,
+  ChevronDown,
+  Menu,
   X,
   Play,
   Inbox,
@@ -47,7 +50,14 @@ import {
   TrendingUp,
   Calendar,
   Award,
+  CheckSquare,
+  Square,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  Tag,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { POLISH_VOIVODESHIPS } from "@/lib/geo";
 
 interface LeadItem {
@@ -131,6 +141,33 @@ export default function LeadMachineDashboard() {
   const [cityFilter, setCityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [activeTab, setActiveTab] = useState<"crm" | "generator" | "outreach" | "history" | "review" | "import" | "settings" | "team">("crm");
+
+  // CRM Data Grid: Multiselect, Bulk Actions, Sorting & Pagination
+  const [selectedCrmLeadIds, setSelectedCrmLeadIds] = useState<number[]>([]);
+  const [bulkProcessing, setBulkProcessing] = useState<{ active: boolean; label: string; current: number; total: number } | null>(null);
+  const [bulkStatusModal, setBulkStatusModal] = useState<boolean>(false);
+  const [targetBulkStatus, setTargetBulkStatus] = useState<string>("qualified");
+  const [sortField, setSortField] = useState<"companyName" | "score" | "city" | "status" | "id">("score");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [quickFilter, setQuickFilter] = useState<"all" | "pending_approval" | "needs_review" | "qualified" | "in_sequence" | "with_offer" | "with_email">("all");
+  const [pageSize, setPageSize] = useState<number>(25);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  // Collapsible Sidebar & Navigation Hub state
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Dedicated CSV / Excel Import state
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importPreviewRows, setImportPreviewRows] = useState<any[]>([]);
+  const [importDetectedHeaders, setImportDetectedHeaders] = useState<{ [key: string]: string }>({});
+  const [importStats, setImportStats] = useState<{ totalRows: number; fileSizeKb: number } | null>(null);
+  const [importTargetCity, setImportTargetCity] = useState<string>("");
+  const [importTargetVoivodeship, setImportTargetVoivodeship] = useState<string>("dolnoslaskie");
+  const [importDeduplicate, setImportDeduplicate] = useState<boolean>(true);
+  const [importRunning, setImportRunning] = useState<boolean>(false);
+  const [importReport, setImportReport] = useState<{ added: number; duplicates: number; rejectedRadius?: number } | null>(null);
+  const [rawParsedImportItems, setRawParsedImportItems] = useState<any[]>([]);
 
   // Batch Outreach & AI Act Human Oversight state
   const [selectedOutreachIds, setSelectedOutreachIds] = useState<number[]>([]);
@@ -355,6 +392,7 @@ export default function LeadMachineDashboard() {
     followupDraft?: any;
     alreadySent?: boolean;
     canSendFollowup?: boolean;
+    outboundCount?: number;
   } | null>(null);
   const [outreachLoading, setOutreachLoading] = useState(false);
   const [outreachSubject, setOutreachSubject] = useState("");
@@ -616,9 +654,322 @@ export default function LeadMachineDashboard() {
       const matchesCity = cityFilter === "all" || (lead.city && lead.city.toLowerCase() === cityFilter.toLowerCase());
       const matchesStatus = statusFilter === "all" || lead.status === statusFilter;
 
-      return matchesSearch && matchesCity && matchesStatus;
+      const matchesQuick =
+        quickFilter === "all" ||
+        (quickFilter === "pending_approval" && lead.status === "pending_approval") ||
+        (quickFilter === "needs_review" && lead.status === "needs_review") ||
+        (quickFilter === "qualified" && ["qualified", "pending_approval", "in_sequence", "approved"].includes(lead.status)) ||
+        (quickFilter === "in_sequence" && ["in_sequence", "followup_sent", "sent"].includes(lead.status)) ||
+        (quickFilter === "with_offer" && Boolean(lead.offer)) ||
+        (quickFilter === "with_email" && Boolean(lead.emailPrimary));
+
+      return matchesSearch && matchesCity && matchesStatus && matchesQuick;
     });
-  }, [leads, search, cityFilter, statusFilter]);
+  }, [leads, search, cityFilter, statusFilter, quickFilter]);
+
+  // Quick Filter Counts
+  const quickFilterCounts = useMemo(() => {
+    return {
+      all: leads.length,
+      pending_approval: leads.filter((l) => l.status === "pending_approval").length,
+      needs_review: leads.filter((l) => l.status === "needs_review").length,
+      qualified: leads.filter((l) => ["qualified", "pending_approval", "in_sequence", "approved"].includes(l.status)).length,
+      in_sequence: leads.filter((l) => ["in_sequence", "followup_sent", "sent"].includes(l.status)).length,
+      with_offer: leads.filter((l) => Boolean(l.offer)).length,
+      with_email: leads.filter((l) => Boolean(l.emailPrimary)).length,
+    };
+  }, [leads]);
+
+  // Sorted Leads
+  const sortedLeads = useMemo(() => {
+    return [...filteredLeads].sort((a, b) => {
+      let comparison = 0;
+      if (sortField === "score") {
+        comparison = (a.score || 0) - (b.score || 0);
+      } else if (sortField === "companyName") {
+        comparison = a.companyName.localeCompare(b.companyName, "pl");
+      } else if (sortField === "city") {
+        comparison = (a.city || "").localeCompare(b.city || "", "pl");
+      } else if (sortField === "status") {
+        comparison = a.status.localeCompare(b.status);
+      } else if (sortField === "id") {
+        comparison = a.id - b.id;
+      }
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [filteredLeads, sortField, sortDirection]);
+
+  // Paginated Leads
+  const paginatedLeads = useMemo(() => {
+    if (pageSize === -1) return sortedLeads;
+    const start = (currentPage - 1) * pageSize;
+    return sortedLeads.slice(start, start + pageSize);
+  }, [sortedLeads, currentPage, pageSize]);
+
+  const totalPages = useMemo(() => {
+    if (pageSize === -1 || sortedLeads.length === 0) return 1;
+    return Math.ceil(sortedLeads.length / pageSize);
+  }, [sortedLeads.length, pageSize]);
+
+  const handleSort = (field: "companyName" | "score" | "city" | "status" | "id") => {
+    if (sortField === field) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDirection(field === "companyName" || field === "city" ? "asc" : "desc");
+    }
+    setCurrentPage(1);
+  };
+
+  // CRM Multiselect Handlers
+  const toggleSelectLead = (id: number) => {
+    setSelectedCrmLeadIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllVisible = () => {
+    const visibleIds = paginatedLeads.map((l) => l.id);
+    const allSelected = visibleIds.every((id) => selectedCrmLeadIds.includes(id));
+    if (allSelected) {
+      setSelectedCrmLeadIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedCrmLeadIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const selectAllFiltered = () => {
+    setSelectedCrmLeadIds(sortedLeads.map((l) => l.id));
+  };
+
+  const clearCrmSelection = () => {
+    setSelectedCrmLeadIds([]);
+  };
+
+  const allVisibleSelected = useMemo(() => {
+    const visibleIds = paginatedLeads.map((l) => l.id);
+    return visibleIds.length > 0 && visibleIds.every((id) => selectedCrmLeadIds.includes(id));
+  }, [paginatedLeads, selectedCrmLeadIds]);
+
+  const someVisibleSelected = useMemo(() => {
+    const visibleIds = paginatedLeads.map((l) => l.id);
+    return visibleIds.some((id) => selectedCrmLeadIds.includes(id));
+  }, [paginatedLeads, selectedCrmLeadIds]);
+
+  // Drawer Master-Detail Navigation (Previous / Next Lead)
+  const currentLeadIndex = useMemo(() => {
+    if (!selectedLead) return -1;
+    return sortedLeads.findIndex((l) => l.id === selectedLead.id);
+  }, [selectedLead, sortedLeads]);
+
+  const hasPrevLead = currentLeadIndex > 0;
+  const hasNextLead = currentLeadIndex !== -1 && currentLeadIndex < sortedLeads.length - 1;
+
+  const goToPrevLead = () => {
+    if (hasPrevLead) {
+      setSelectedLead(sortedLeads[currentLeadIndex - 1]);
+    }
+  };
+
+  const goToNextLead = () => {
+    if (hasNextLead) {
+      setSelectedLead(sortedLeads[currentLeadIndex + 1]);
+    }
+  };
+
+  // Keyboard navigation shortcuts: Esc (close drawer), ArrowLeft (prev lead), ArrowRight (next lead)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!selectedLead) return;
+      const target = e.target as HTMLElement;
+      const isInput =
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.tagName === "SELECT" ||
+        target.isContentEditable;
+      if (e.key === "Escape") {
+        setSelectedLead(null);
+      } else if (!isInput && e.key === "ArrowLeft") {
+        if (currentLeadIndex > 0) {
+          setSelectedLead(sortedLeads[currentLeadIndex - 1]);
+        }
+      } else if (!isInput && e.key === "ArrowRight") {
+        if (currentLeadIndex !== -1 && currentLeadIndex < sortedLeads.length - 1) {
+          setSelectedLead(sortedLeads[currentLeadIndex + 1]);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedLead, currentLeadIndex, sortedLeads]);
+
+  // Deep-linking: sync URL with selectedLead
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    if (selectedLead) {
+      url.searchParams.set("leadId", String(selectedLead.id));
+    } else {
+      url.searchParams.delete("leadId");
+    }
+    window.history.replaceState({}, "", url.toString());
+  }, [selectedLead?.id]);
+
+  // Deep-linking: open lead if leadId is in URL on load
+  useEffect(() => {
+    if (typeof window === "undefined" || leads.length === 0 || selectedLead) return;
+    const url = new URL(window.location.href);
+    const paramId = url.searchParams.get("leadId");
+    if (paramId) {
+      const found = leads.find((l) => l.id === Number(paramId));
+      if (found) {
+        setSelectedLead(found);
+      }
+    }
+  }, [leads]);
+
+  // Bulk Actions
+  const handleBulkAudit = async () => {
+    const targetLeads = leads.filter(
+      (l) => selectedCrmLeadIds.includes(l.id) && l.website && !l.audit
+    );
+    if (targetLeads.length === 0) {
+      showToast("Wszystkie wybrane firmy posiadają już audyt lub nie mają strony WWW.", "info");
+      return;
+    }
+    setBulkProcessing({ active: true, label: "Audyt technologiczny WWW", current: 0, total: targetLeads.length });
+    let successCount = 0;
+    for (let i = 0; i < targetLeads.length; i++) {
+      setBulkProcessing({ active: true, label: `Audyt WWW: ${targetLeads[i].companyName}`, current: i + 1, total: targetLeads.length });
+      try {
+        await fetch(`/api/audit/${targetLeads[i].id}`, { method: "POST" });
+        successCount++;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setBulkProcessing(null);
+    showToast(`Zakończono audyt ${successCount} z ${targetLeads.length} firm!`);
+    await fetchLeads();
+  };
+
+  const handleBulkGenerateOffers = async () => {
+    const targetLeads = leads.filter(
+      (l) => selectedCrmLeadIds.includes(l.id) && !l.offer && l.status !== "disqualified"
+    );
+    if (targetLeads.length === 0) {
+      showToast("Wszystkie wybrane firmy posiadają już wygenerowaną ofertę.", "info");
+      return;
+    }
+    setBulkProcessing({ active: true, label: "Generowanie ofert Gemini AI", current: 0, total: targetLeads.length });
+    let successCount = 0;
+    for (let i = 0; i < targetLeads.length; i++) {
+      setBulkProcessing({ active: true, label: `Oferta dla: ${targetLeads[i].companyName}`, current: i + 1, total: targetLeads.length });
+      try {
+        const res = await fetch(`/api/offers/${targetLeads[i].id}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        if (data.success) successCount++;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setBulkProcessing(null);
+    showToast(`Wygenerowano ${successCount} nowych stron ofertowych!`);
+    await fetchLeads();
+  };
+
+  const handleBulkQualify = async () => {
+    const targetLeads = leads.filter((l) => selectedCrmLeadIds.includes(l.id));
+    if (targetLeads.length === 0) return;
+    setBulkProcessing({ active: true, label: "Przeliczanie scoringu", current: 0, total: targetLeads.length });
+    let successCount = 0;
+    for (let i = 0; i < targetLeads.length; i++) {
+      setBulkProcessing({ active: true, label: `Scoring: ${targetLeads[i].companyName}`, current: i + 1, total: targetLeads.length });
+      try {
+        await fetch(`/api/qualify/${targetLeads[i].id}`, { method: "POST" });
+        successCount++;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setBulkProcessing(null);
+    showToast(`Zaktualizowano scoring dla ${successCount} firm!`);
+    await fetchLeads();
+  };
+
+  const handleBulkChangeStatus = async (targetStatus: string) => {
+    if (selectedCrmLeadIds.length === 0) return;
+    setBulkProcessing({ active: true, label: `Zmiana statusu na ${targetStatus}`, current: 0, total: selectedCrmLeadIds.length });
+    let successCount = 0;
+    for (let i = 0; i < selectedCrmLeadIds.length; i++) {
+      const id = selectedCrmLeadIds[i];
+      setBulkProcessing({ active: true, label: `Status leada #${id}`, current: i + 1, total: selectedCrmLeadIds.length });
+      try {
+        await fetch(`/api/leads/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: targetStatus }),
+        });
+        successCount++;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setBulkProcessing(null);
+    setBulkStatusModal(false);
+    showToast(`Zaktualizowano status ${successCount} firm!`);
+    await fetchLeads();
+  };
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Czy na pewno chcesz trwale usunąć ${selectedCrmLeadIds.length} zaznaczonych firm z bazy CRM?`)) return;
+    setBulkProcessing({ active: true, label: "Usuwanie rekordów", current: 0, total: selectedCrmLeadIds.length });
+    let successCount = 0;
+    for (let i = 0; i < selectedCrmLeadIds.length; i++) {
+      const id = selectedCrmLeadIds[i];
+      try {
+        await fetch(`/api/leads/${id}`, { method: "DELETE" });
+        successCount++;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    setBulkProcessing(null);
+    setSelectedCrmLeadIds([]);
+    showToast(`Usunięto ${successCount} firm z bazy CRM!`);
+    await fetchLeads();
+  };
+
+  const handleBulkExport = () => {
+    const exportTargets = leads.filter((l) => selectedCrmLeadIds.includes(l.id));
+    if (exportTargets.length === 0) return;
+    const rows = exportTargets.map((l) => ({
+      ID: l.id,
+      Firma: l.companyName,
+      NIP: l.nip || "",
+      KRS: l.krs || "",
+      Miasto: l.city || "",
+      Telefon: l.phoneNormalized || "",
+      Email: l.emailPrimary || "",
+      StronaWWW: l.website || "",
+      Branza: l.industry || "",
+      Status: l.status,
+      Score: l.score,
+      OfertaToken: l.offer?.token || "",
+      LiczbaOdslonOferty: l.offer?.viewCount || 0,
+      DataDodania: l.createdAt ? new Date(l.createdAt).toLocaleDateString("pl-PL") : "",
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Zaznaczone_Leady");
+    XLSX.writeFile(workbook, `leady_zaznaczone_${exportTargets.length}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    showToast(`Wyeksportowano ${exportTargets.length} firm do pliku Excel!`);
+  };
 
   // Filtered Outreach History
   const filteredHistory = useMemo(() => {
@@ -679,10 +1030,30 @@ export default function LeadMachineDashboard() {
   // Metric counts
   const metrics = useMemo(() => {
     const total = leads.length;
-    const qualified = leads.filter((l) => ["qualified", "offer_published", "sent", "followup_sent"].includes(l.status)).length;
+    const qualified = leads.filter((l) =>
+      [
+        "qualified",
+        "pending_approval",
+        "approved",
+        "in_sequence",
+        "offer_ready",
+        "offer_published",
+        "sent",
+        "followup_sent",
+        "replied_interested",
+        "meeting_booked",
+        "won",
+      ].includes(l.status)
+    ).length;
     const needsReview = leads.filter((l) => l.status === "needs_review").length;
     const offersPublished = leads.filter((l) => l.offer).length;
-    const emailsSent = leads.filter((l) => l.status === "sent" || l.status === "followup_sent" || l.messages?.some((m) => m.status === "sent")).length;
+    const emailsSent = leads.filter(
+      (l) =>
+        l.status === "sent" ||
+        l.status === "followup_sent" ||
+        l.status === "in_sequence" ||
+        l.messages?.some((m) => m.status === "sent")
+    ).length;
     const disqualified = leads.filter((l) => l.status === "disqualified").length;
     const readyToSend = pendingApprovalLeads.length;
 
@@ -1537,7 +1908,7 @@ export default function LeadMachineDashboard() {
 
         items.push({
           companyName: parts[nameIdx !== -1 ? nameIdx : 0] || "Firma",
-          city: parts[cityIdx !== -1 ? cityIdx : 1] || "Legnica",
+          city: parts[cityIdx !== -1 ? cityIdx : 1] || targetingSettings.defaultCity || "Polska",
           phone: parts[phoneIdx !== -1 ? phoneIdx : 2] || "",
           address: parts[addressIdx !== -1 ? addressIdx : 3] || "",
           website: parts[webIdx !== -1 ? webIdx : 4] || "",
@@ -1567,8 +1938,122 @@ export default function LeadMachineDashboard() {
     }
   };
 
+  // Dedicated CSV & Excel File Processor (Prompt 5)
+  const handleProcessImportFile = async (file: File) => {
+    try {
+      setImportFile(file);
+      setImportReport(null);
+      const isExcel = file.name.endsWith(".xlsx") || file.name.endsWith(".xls");
+      let rows: string[][] = [];
+
+      if (isExcel) {
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: "array" });
+        const sheetName = wb.SheetNames[0];
+        const sheet = wb.Sheets[sheetName];
+        rows = XLSX.utils.sheet_to_json(sheet, { header: 1 }) as string[][];
+      } else {
+        const text = await file.text();
+        const lines = text.split("\n").filter((l) => l.trim().length > 0);
+        // Detect delimiter (comma vs semicolon)
+        const delimiter = lines[0].includes(";") ? ";" : ",";
+        rows = lines.map((l) => l.split(delimiter).map((p) => p.trim().replace(/^["']|["']$/g, "")));
+      }
+
+      if (rows.length <= 1) {
+        showToast("Plik jest pusty lub zawiera tylko nagłówek", "error");
+        return;
+      }
+
+      const headers = rows[0].map((h) => String(h || "").trim().toLowerCase());
+      const nameIdx = headers.findIndex((h) => h.includes("name") || h.includes("firma") || h.includes("nazwa"));
+      const cityIdx = headers.findIndex((h) => h.includes("city") || h.includes("miasto") || h.includes("miejsc"));
+      const phoneIdx = headers.findIndex((h) => h.includes("phone") || h.includes("tel"));
+      const webIdx = headers.findIndex((h) => h.includes("web") || h.includes("url") || h.includes("strona") || h.includes("witryn"));
+      const addressIdx = headers.findIndex((h) => h.includes("addr") || h.includes("adres") || h.includes("ulic"));
+      const nipIdx = headers.findIndex((h) => h.includes("nip"));
+      const catIdx = headers.findIndex((h) => h.includes("cat") || h.includes("bran") || h.includes("kategori"));
+      const emailIdx = headers.findIndex((h) => h.includes("mail") || h.includes("email") || h.includes("e-mail"));
+
+      const detected: { [key: string]: string } = {};
+      if (nameIdx !== -1) detected["Nazwa firmy"] = rows[0][nameIdx];
+      if (cityIdx !== -1) detected["Miasto"] = rows[0][cityIdx];
+      if (phoneIdx !== -1) detected["Telefon"] = rows[0][phoneIdx];
+      if (webIdx !== -1) detected["Strona WWW"] = rows[0][webIdx];
+      if (emailIdx !== -1) detected["E-mail"] = rows[0][emailIdx];
+      if (nipIdx !== -1) detected["NIP"] = rows[0][nipIdx];
+      if (catIdx !== -1) detected["Branża"] = rows[0][catIdx];
+      setImportDetectedHeaders(detected);
+
+      const items: any[] = [];
+      for (let i = 1; i < rows.length; i++) {
+        const parts = rows[i];
+        if (!parts || parts.length === 0) continue;
+        const compName = parts[nameIdx !== -1 ? nameIdx : 0];
+        if (!compName) continue;
+
+        items.push({
+          companyName: String(compName).trim(),
+          city: (cityIdx !== -1 && parts[cityIdx]) ? String(parts[cityIdx]).trim() : undefined,
+          phone: (phoneIdx !== -1 && parts[phoneIdx]) ? String(parts[phoneIdx]).trim() : "",
+          address: (addressIdx !== -1 && parts[addressIdx]) ? String(parts[addressIdx]).trim() : "",
+          website: (webIdx !== -1 && parts[webIdx]) ? String(parts[webIdx]).trim() : "",
+          email: (emailIdx !== -1 && parts[emailIdx]) ? String(parts[emailIdx]).trim() : undefined,
+          industry: (catIdx !== -1 && parts[catIdx]) ? String(parts[catIdx]).trim() : "B2B",
+          nip: (nipIdx !== -1 && parts[nipIdx]) ? String(parts[nipIdx]).trim() : undefined,
+        });
+      }
+
+      setRawParsedImportItems(items);
+      setImportStats({
+        totalRows: items.length,
+        fileSizeKb: Math.round(file.size / 1024),
+      });
+      setImportPreviewRows(items.slice(0, 5));
+      showToast(`Załadowano plik: ${items.length} pozycji do zaimportowania`, "success");
+    } catch (err: any) {
+      console.error(err);
+      showToast("Błąd przetwarzania pliku: " + err.message, "error");
+    }
+  };
+
+  const handleExecuteImport = async () => {
+    if (rawParsedImportItems.length === 0) return;
+    setImportRunning(true);
+    showToast("Trwa importowanie danych do bazy...", "info");
+
+    try {
+      const targetItems = rawParsedImportItems.map((item) => ({
+        ...item,
+        city: item.city || importTargetCity || targetingSettings.defaultCity || "Polska",
+      }));
+
+      const res = await fetch("/api/scraper", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ csvItems: targetItems }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setImportReport({
+          added: data.added || 0,
+          duplicates: data.rejectedDuplicates || 0,
+          rejectedRadius: data.rejectedRadius || 0,
+        });
+        showToast(`Zaimportowano pomyślnie +${data.added} firm do bazy!`, "success");
+        await fetchLeads();
+      } else {
+        showToast(data.error || "Błąd podczas importu", "error");
+      }
+    } catch (err: any) {
+      showToast("Błąd połączenia z serwerem importu", "error");
+    } finally {
+      setImportRunning(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#0A0E17] text-[#F8FAFC]">
+    <div className="min-h-screen bg-[#0A0E17] text-[#F8FAFC] flex flex-col lg:flex-row">
       {/* Toast Notification */}
       {toast && (
         <div
@@ -1585,104 +2070,208 @@ export default function LeadMachineDashboard() {
         </div>
       )}
 
-      {/* TOP HEADER */}
-      <header className="border-b border-[#28354D] bg-[#0E1422] px-6 py-4 sticky top-0 z-30">
-        <div className="max-w-[1700px] mx-auto flex flex-wrap items-center justify-between gap-4">
-          {/* Logo & Subtitle */}
-          <div className="flex items-center gap-3">
-            <div className="bg-[#FFE600] text-black font-black text-xl px-3 py-1 rounded-lg shadow-[0_0_15px_rgba(255,230,0,0.4)]">
+      {/* MOBILE TOP BAR (< lg) */}
+      <div className="lg:hidden bg-[#0E1422] border-b border-[#28354D] px-4 py-3 flex items-center justify-between sticky top-0 z-40">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setMobileMenuOpen(true)}
+            className="p-2 rounded-lg bg-[#141C2E] border border-[#28354D] text-white hover:bg-[#1E293B] cursor-pointer"
+          >
+            <Menu size={20} />
+          </button>
+          <div className="flex items-center gap-2">
+            <div className="bg-[#FFE600] text-black font-black text-sm px-2 py-0.5 rounded shadow">
               %
             </div>
+            <span className="font-extrabold text-sm text-white">Lead Machine</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {pendingApprovalLeads.length > 0 && (
+            <button
+              onClick={() => setActiveTab("outreach")}
+              className="bg-[#FFE600] text-black text-[10px] font-black px-2 py-1 rounded-full flex items-center gap-1 shadow animate-pulse cursor-pointer"
+            >
+              <ShieldCheck size={12} />
+              <span>{pendingApprovalLeads.length} AI</span>
+            </button>
+          )}
+          <button
+            onClick={fetchLeads}
+            className="p-2 rounded-lg bg-[#141C2E] border border-[#28354D] text-[#94A3B8] hover:text-white cursor-pointer"
+            title="Odśwież"
+          >
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+          </button>
+        </div>
+      </div>
+
+      {/* MOBILE NAVIGATION DRAWER (< lg) */}
+      {mobileMenuOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex">
+          <div
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm animate-in fade-in"
+            onClick={() => setMobileMenuOpen(false)}
+          />
+          <div className="relative w-72 bg-[#0E1422] border-r border-[#28354D] h-full flex flex-col justify-between p-4 z-10 animate-in slide-in-from-left duration-200">
             <div>
-              <h1 className="text-xl font-extrabold tracking-tight flex items-center gap-2">
-                PROCENT MARKETING <span className="text-[#FFE600]">LEAD MACHINE 2.0</span>
-              </h1>
-              <p className="text-xs text-[#94A3B8]">
-                Platforma Pozyskiwania Klientów B2B & Personalizacji Ofert • Pokrycie Ogólnopolskie
-              </p>
-            </div>
-          </div>
-
-          {/* Badges & Mode indicators */}
-          <div className="flex items-center gap-3">
-            {currentUser?.tenantName && (
-              <div className="flex items-center gap-1.5 bg-[#141C2E] border border-[#38BDF8]/40 text-[#38BDF8] px-3 py-1.5 rounded-full text-xs font-bold shadow-sm">
-                <Building size={13} className="text-[#38BDF8]" />
-                <span className="text-[10px] text-[#94A3B8] font-normal uppercase hidden md:inline">TENANT:</span>
-                <span>{currentUser.tenantName}</span>
-              </div>
-            )}
-            <div className="hidden sm:flex items-center gap-2 bg-[#141C2E] border border-[#28354D] px-3 py-1.5 rounded-full text-xs">
-              <span className="pulse-dot"></span>
-              <span className="font-bold text-[#A5B4FC]">AUTONOMOUS AI: ON</span>
-            </div>
-            <div className="flex items-center gap-2 bg-[#064E3B] border border-[#059669] text-[#34D399] px-3 py-1.5 rounded-full text-xs font-bold">
-              🟢 SANDBOX MODE
-            </div>
-            <div className="flex items-center gap-2 bg-[#141C2E] border border-[#28354D] text-[#38BDF8] px-3 py-1.5 rounded-full text-xs font-bold">
-              🛡️ BEZPIECZNIK STOP: OK
-            </div>
-          </div>
-
-          {/* Action Buttons */}
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={handleRunFullPipeline}
-              disabled={pipelineRunning}
-              className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(255,230,0,0.3)] disabled:opacity-50"
-            >
-              <Zap size={16} />
-              {pipelineRunning ? "Przetwarzanie..." : "Uruchom Pełny Cykl"}
-            </button>
-            <button
-              onClick={handlePollInbox}
-              disabled={inboxLoading}
-              className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8]/50 text-[#38BDF8] font-bold text-sm px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50"
-              title="Odpytaj serwer IMAP w poszukiwaniu nowych odpowiedzi klientów"
-            >
-              <Inbox size={16} className={inboxLoading ? "animate-pulse" : ""} />
-              <span className="hidden lg:inline">{inboxLoading ? "Sprawdzanie..." : "Sprawdź skrzynkę (IMAP)"}</span>
-            </button>
-            <a
-              href="/api/export"
-              target="_blank"
-              className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-sm px-3 py-2 rounded-lg flex items-center gap-2 transition-all"
-            >
-              <Download size={15} />
-              <span className="hidden md:inline">Eksport Excel</span>
-            </a>
-            <button
-              onClick={fetchLeads}
-              className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white p-2 rounded-lg transition-all"
-              title="Odśwież dane z bazy"
-            >
-              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
-            </button>
-
-            {/* User Profile & Logout */}
-            {currentUser && (
-              <div className="flex items-center gap-2.5 pl-3 border-l border-[#28354D]">
-                <div className="text-right hidden sm:block">
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5 justify-end">
-                    <User size={13} className="text-[#FFE600]" />
-                    {currentUser.name}
+              {/* Drawer Brand */}
+              <div className="flex items-center justify-between border-b border-[#28354D] pb-4 mb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="bg-[#FFE600] text-black font-black text-base px-2.5 py-1 rounded-lg shadow-[0_0_12px_rgba(255,230,0,0.3)]">
+                    %
                   </div>
-                  <div className="text-[10px] text-[#94A3B8] font-mono flex items-center gap-1 justify-end">
-                    <span className="truncate max-w-[130px]">{currentUser.email}</span>
-                    <span>•</span>
-                    <span className="text-[#FFE600] font-bold uppercase">{currentUser.role}</span>
-                    {currentUser.tenantName && (
-                      <>
-                        <span>•</span>
-                        <span className="text-[#38BDF8] font-bold">{currentUser.tenantName}</span>
-                      </>
-                    )}
+                  <div>
+                    <h2 className="text-sm font-black text-white">PROCENT MARKETING</h2>
+                    <span className="text-[10px] text-[#FFE600] font-bold">LEAD MACHINE 2.0</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="p-1.5 rounded-lg text-[#94A3B8] hover:text-white hover:bg-[#1E293B] cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Mobile Nav Links */}
+              <nav className="space-y-6">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#64748B] block mb-2 px-2">
+                    Proces Lejka (Pipeline)
+                  </span>
+                  <div className="space-y-1">
+                    {[
+                      { id: "crm", label: "Pipeline CRM", icon: Building, badge: leads.length },
+                      { id: "outreach", label: "Zatwierdzanie Ofert", icon: ShieldCheck, badge: pendingApprovalLeads.length, highlight: pendingApprovalLeads.length > 0 },
+                      { id: "history", label: "Baza Wysłanych & KPI", icon: History, badge: historyMetrics?.totalOutreached || 0 },
+                      { id: "review", label: "Weryfikacja AI", icon: AlertTriangle, badge: metrics.needsReview },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setActiveTab(item.id as any);
+                            setMobileMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            isActive
+                              ? "bg-[#FFE600] text-black shadow-md shadow-[#FFE600]/20 font-black"
+                              : "text-[#94A3B8] hover:text-white hover:bg-[#141C2E]"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Icon size={16} />
+                            <span>{item.label}</span>
+                          </div>
+                          {item.badge != null && item.badge > 0 && (
+                            <span
+                              className={`text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+                                isActive
+                                  ? "bg-black text-[#FFE600]"
+                                  : item.highlight
+                                  ? "bg-[#FFE600] text-black"
+                                  : "bg-[#1E293B] text-[#CBD5E1]"
+                              }`}
+                            >
+                              {item.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#64748B] block mb-2 px-2">
+                    Pozyskiwanie Leadów
+                  </span>
+                  <div className="space-y-1">
+                    {[
+                      { id: "generator", label: "Generator & Scraper", icon: Search },
+                      { id: "import", label: "Import Bazy (CSV / Excel)", icon: Upload },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setActiveTab(item.id as any);
+                            setMobileMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            isActive
+                              ? "bg-[#FFE600] text-black shadow-md shadow-[#FFE600]/20 font-black"
+                              : "text-[#94A3B8] hover:text-white hover:bg-[#141C2E]"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Icon size={16} />
+                            <span>{item.label}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#64748B] block mb-2 px-2">
+                    Administracja
+                  </span>
+                  <div className="space-y-1">
+                    {[
+                      { id: "settings", label: "Ustawienia & Reguły", icon: SettingsIcon },
+                      { id: "team", label: "Zespół & Dostęp", icon: Users },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeTab === item.id;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setActiveTab(item.id as any);
+                            setMobileMenuOpen(false);
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            isActive
+                              ? "bg-[#FFE600] text-black shadow-md shadow-[#FFE600]/20 font-black"
+                              : "text-[#94A3B8] hover:text-white hover:bg-[#141C2E]"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Icon size={16} />
+                            <span>{item.label}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </nav>
+            </div>
+
+            {/* Mobile Footer User */}
+            {currentUser && (
+              <div className="border-t border-[#28354D] pt-3 flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full bg-[#1E293B] border border-[#334155] text-[#FFE600] font-black text-xs flex items-center justify-center">
+                    {currentUser.name.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white leading-tight">{currentUser.name}</div>
+                    <div className="text-[10px] text-[#94A3B8]">{currentUser.role}</div>
                   </div>
                 </div>
                 <button
                   onClick={handleLogout}
-                  className="bg-[#1E293B] hover:bg-[#881337] border border-[#334155] hover:border-[#E11D48] text-[#94A3B8] hover:text-white p-2 rounded-lg transition-all"
-                  title="Wyloguj się z systemu"
+                  className="p-2 text-[#94A3B8] hover:text-rose-400 cursor-pointer"
+                  title="Wyloguj"
                 >
                   <LogOut size={16} />
                 </button>
@@ -1690,191 +2279,443 @@ export default function LeadMachineDashboard() {
             )}
           </div>
         </div>
-      </header>
+      )}
 
-      {/* METRIC STRIP */}
-      <section className="bg-[#101726] border-b border-[#28354D] py-4 px-6">
-        <div className="max-w-[1700px] mx-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-          <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#94A3B8]">Wszystkie Leady</span>
-            <div className="text-2xl font-black text-white mt-1">{metrics.total}</div>
-          </div>
-          <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#34D399]">Zakwalifikowane</span>
-            <div className="text-2xl font-black text-[#34D399] mt-1">{metrics.qualified}</div>
-          </div>
-          <div
-            onClick={() => setActiveTab("outreach")}
-            className="bg-[#141C2E] border-2 border-[#FFE600]/80 p-3.5 rounded-xl cursor-pointer hover:bg-[#1E293B] transition-all group"
-            title="Kliknij, aby przejść do zatwierdzania i wysyłki ofert"
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-black uppercase tracking-wider text-[#FFE600]">
-                Do Wysyłki (AI Act)
-              </span>
-              <span className="text-[9px] bg-[#FFE600] text-black font-extrabold px-1.5 py-0.5 rounded">
-                AUDYT
-              </span>
-            </div>
-            <div className="text-2xl font-black text-[#FFE600] mt-1 flex items-center justify-between">
-              <span>{metrics.readyToSend}</span>
-              <ArrowRight size={18} className="text-[#FFE600] group-hover:translate-x-1 transition-transform" />
-            </div>
-          </div>
-          <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#38BDF8]">Oferty Netlify</span>
-            <div className="text-2xl font-black text-[#38BDF8] mt-1">{metrics.offersPublished}</div>
-          </div>
-          <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#C084FC]">Wysłane E-maile</span>
-            <div className="text-2xl font-black text-[#C084FC] mt-1">{metrics.emailsSent}</div>
-          </div>
-          <div className="bg-[#141C2E] border border-[#28354D] p-3.5 rounded-xl">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-[#FBBF24]">Weryfikacja Leada</span>
-            <div className="text-2xl font-black text-[#FBBF24] mt-1">{metrics.needsReview}</div>
-          </div>
-        </div>
-      </section>
-
-      {/* MAIN CONTAINER */}
-      <main className="max-w-[1700px] mx-auto p-6">
-        {/* BANNER: AI ACT HUMAN OVERSIGHT ALERT */}
-        {pendingApprovalLeads.length > 0 && (
-          <div className="mb-6 bg-gradient-to-r from-[#141C2E] via-[#1A2338] to-[#141C2E] border-2 border-[#FFE600]/70 p-4 sm:p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl shadow-yellow-500/5">
-            <div className="flex items-start gap-3.5">
-              <div className="p-3 bg-[#FFE600]/10 border border-[#FFE600]/30 text-[#FFE600] rounded-xl shrink-0 mt-0.5">
-                <ShieldCheck size={26} />
+      {/* DESKTOP SIDEBAR (>= lg) */}
+      <aside
+        className={`hidden lg:flex flex-col justify-between bg-[#0E1422] border-r border-[#28354D] h-screen sticky top-0 transition-all duration-200 z-30 shrink-0 ${
+          sidebarCollapsed ? "w-20 p-3" : "w-64 p-4"
+        }`}
+      >
+        <div className="space-y-6">
+          {/* Brand header */}
+          <div className="flex items-center justify-between border-b border-[#28354D] pb-4">
+            <div className="flex items-center gap-3 overflow-hidden">
+              <div className="bg-[#FFE600] text-black font-black text-lg w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(255,230,0,0.3)]">
+                %
               </div>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="bg-[#FFE600] text-black text-[10px] font-black uppercase px-2 py-0.5 rounded tracking-wider">
-                    AI Act Art. 14 • Maszyna Wstrzymana
-                  </span>
-                  <span className="text-xs text-[#38BDF8] font-bold">
-                    Oczekiwanie na akceptację człowieka
-                  </span>
+              {!sidebarCollapsed && (
+                <div className="min-w-0">
+                  <h1 className="text-xs font-black tracking-tight text-white truncate">
+                    PROCENT MARKETING
+                  </h1>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[10px] text-[#FFE600] font-bold">LEAD MACHINE</span>
+                    <span className="text-[9px] bg-[#1E293B] text-[#94A3B8] px-1 py-0.2 rounded font-mono font-bold">
+                      v2.0
+                    </span>
+                  </div>
                 </div>
-                <h3 className="text-base font-extrabold text-white mt-1">
-                  {pendingApprovalLeads.length} wygenerowanych ofert i maili czeka na Twoje sprawdzenie
-                </h3>
-                <p className="text-xs text-[#94A3B8] mt-0.5">
-                  Automatyczna wysyłka została zatrzymana. Możesz przejrzeć każdą stronę oferty WWW, sprawdzić treść maila i kliknąć „Wyślij wszystko” jednym guzikiem.
-                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Mode Badges (Sandbox & Kill Switch) */}
+          {!sidebarCollapsed && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between bg-[#064E3B]/60 border border-[#059669]/60 px-2.5 py-1.5 rounded-lg text-[10px] text-[#34D399] font-bold">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#34D399] animate-pulse"></span>
+                  SANDBOX MODE
+                </span>
+                <span className="font-mono text-[9px] text-[#A7F3D0]">LIVE=false</span>
+              </div>
+              <div className="flex items-center justify-between bg-[#141C2E] border border-[#28354D] px-2.5 py-1.5 rounded-lg text-[10px] text-[#94A3B8]">
+                <span>BEZPIECZNIK STOP:</span>
+                <span className="text-emerald-400 font-bold">OK (UZBROJONY)</span>
               </div>
             </div>
-            <div className="flex items-center gap-3 shrink-0 self-end md:self-center">
+          )}
+
+          {/* Navigation Groups */}
+          <nav className="space-y-5">
+            {/* Group 1: Pipeline */}
+            <div>
+              {!sidebarCollapsed && (
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#64748B] block mb-2 px-2">
+                  Proces Lejka
+                </span>
+              )}
+              <div className="space-y-1">
+                {[
+                  { id: "crm", label: "Pipeline CRM", icon: Building, badge: leads.length },
+                  { id: "outreach", label: "Zatwierdzanie Ofert", icon: ShieldCheck, badge: pendingApprovalLeads.length, highlight: pendingApprovalLeads.length > 0 },
+                  { id: "history", label: "Baza Wysłanych", icon: History, badge: historyMetrics?.totalOutreached || 0 },
+                  { id: "review", label: "Weryfikacja AI", icon: AlertTriangle, badge: metrics.needsReview },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveTab(item.id as any)}
+                      className={`w-full flex items-center ${
+                        sidebarCollapsed ? "justify-center p-2.5" : "justify-between px-3 py-2.5"
+                      } rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        isActive
+                          ? "bg-[#FFE600] text-black shadow-lg shadow-[#FFE600]/15 font-black"
+                          : "text-[#94A3B8] hover:text-white hover:bg-[#141C2E]"
+                      }`}
+                      title={sidebarCollapsed ? item.label : undefined}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Icon size={17} className={isActive ? "text-black" : "text-[#94A3B8]"} />
+                        {!sidebarCollapsed && <span>{item.label}</span>}
+                      </div>
+                      {!sidebarCollapsed && item.badge != null && item.badge > 0 && (
+                        <span
+                          className={`text-[10px] font-mono font-black px-1.5 py-0.2 rounded-full ${
+                            isActive
+                              ? "bg-black text-[#FFE600]"
+                              : item.highlight
+                              ? "bg-[#FFE600] text-black"
+                              : "bg-[#1E293B] text-[#CBD5E1]"
+                          }`}
+                        >
+                          {item.badge}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Group 2: Acquisition */}
+            <div>
+              {!sidebarCollapsed && (
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#64748B] block mb-2 px-2">
+                  Pozyskiwanie
+                </span>
+              )}
+              <div className="space-y-1">
+                {[
+                  { id: "generator", label: "Generator & Scraper", icon: Search },
+                  { id: "import", label: "Import CSV / Excel", icon: Upload },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveTab(item.id as any)}
+                      className={`w-full flex items-center ${
+                        sidebarCollapsed ? "justify-center p-2.5" : "justify-between px-3 py-2.5"
+                      } rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        isActive
+                          ? "bg-[#FFE600] text-black shadow-lg shadow-[#FFE600]/15 font-black"
+                          : "text-[#94A3B8] hover:text-white hover:bg-[#141C2E]"
+                      }`}
+                      title={sidebarCollapsed ? item.label : undefined}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Icon size={17} className={isActive ? "text-black" : "text-[#94A3B8]"} />
+                        {!sidebarCollapsed && <span>{item.label}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Group 3: Settings */}
+            <div>
+              {!sidebarCollapsed && (
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#64748B] block mb-2 px-2">
+                  System
+                </span>
+              )}
+              <div className="space-y-1">
+                {[
+                  { id: "settings", label: "Ustawienia & Reguły", icon: SettingsIcon },
+                  { id: "team", label: "Zespół & Dostęp", icon: Users },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => setActiveTab(item.id as any)}
+                      className={`w-full flex items-center ${
+                        sidebarCollapsed ? "justify-center p-2.5" : "justify-between px-3 py-2.5"
+                      } rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        isActive
+                          ? "bg-[#FFE600] text-black shadow-lg shadow-[#FFE600]/15 font-black"
+                          : "text-[#94A3B8] hover:text-white hover:bg-[#141C2E]"
+                      }`}
+                      title={sidebarCollapsed ? item.label : undefined}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <Icon size={17} className={isActive ? "text-black" : "text-[#94A3B8]"} />
+                        {!sidebarCollapsed && <span>{item.label}</span>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </nav>
+        </div>
+
+        {/* Sidebar Footer: Toggle + Profile */}
+        <div className="border-t border-[#28354D] pt-3 space-y-3">
+          <button
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            className="w-full flex items-center justify-center p-2 rounded-xl text-[#94A3B8] hover:text-white hover:bg-[#141C2E] transition-all cursor-pointer text-xs"
+            title={sidebarCollapsed ? "Rozwiń pasek boczny" : "Zwiń pasek boczny"}
+          >
+            {sidebarCollapsed ? <ChevronRight size={18} /> : <div className="flex items-center gap-2"><ChevronLeft size={16} /><span>Zwiń menu</span></div>}
+          </button>
+
+          {currentUser && (
+            <div className={`bg-[#141C2E] rounded-xl border border-[#28354D] p-2.5 flex items-center ${sidebarCollapsed ? "justify-center" : "justify-between gap-2"}`}>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-full bg-[#1E293B] border border-[#334155] text-[#FFE600] font-black text-xs flex items-center justify-center shrink-0">
+                  {currentUser.name.slice(0, 2).toUpperCase()}
+                </div>
+                {!sidebarCollapsed && (
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-white truncate">{currentUser.name}</div>
+                    <div className="text-[10px] text-[#94A3B8] font-mono truncate">
+                      {currentUser.tenantName || currentUser.role}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {!sidebarCollapsed && (
+                <button
+                  onClick={handleLogout}
+                  className="p-1.5 rounded-lg text-[#94A3B8] hover:text-rose-400 hover:bg-[#1E293B] transition-all cursor-pointer"
+                  title="Wyloguj się"
+                >
+                  <LogOut size={15} />
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT AREA */}
+      <div className="flex-1 min-w-0 flex flex-col min-h-screen">
+        {/* Desktop Top Header */}
+        <header className="border-b border-[#28354D] bg-[#0E1422] px-6 py-3.5 sticky top-0 z-20 hidden lg:block">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <h2 className="text-base font-black text-white flex items-center gap-2">
+                {activeTab === "crm" && "Pipeline CRM & Tabela Danych"}
+                {activeTab === "generator" && "Generator Leadów & Web Scraper"}
+                {activeTab === "import" && "Dedykowany Import Bazy (CSV / Excel)"}
+                {activeTab === "outreach" && "Zatwierdzanie Ofert AI & Wysyłka (AI Act Art. 14)"}
+                {activeTab === "history" && "Baza Wysłanych Wiadomości & Metryki Kampanii"}
+                {activeTab === "review" && "Kolejka Spraw Granicznych (Needs Review)"}
+                {activeTab === "settings" && "Konfiguracja Systemu, Poczty & AI"}
+                {activeTab === "team" && "Zarządzanie Zespołem & Zaproszenia"}
+              </h2>
+              {currentUser?.tenantName && (
+                <span className="text-[11px] bg-[#141C2E] border border-[#38BDF8]/40 text-[#38BDF8] font-bold px-2.5 py-0.5 rounded-full">
+                  Organizacja: {currentUser.tenantName}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2.5">
               <button
-                onClick={() => setActiveTab("outreach")}
-                className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8] text-[#38BDF8] hover:text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all cursor-pointer"
+                onClick={handleRunFullPipeline}
+                disabled={pipelineRunning}
+                className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-xs px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all shadow-[0_0_12px_rgba(255,230,0,0.25)] disabled:opacity-50 cursor-pointer"
               >
-                <Eye size={15} /> Przejrzyj oferty i maile
+                <Zap size={14} />
+                {pipelineRunning ? "Przetwarzanie..." : "Uruchom Pełny Cykl"}
               </button>
               <button
-                onClick={() => handleSendAll()}
-                disabled={batchSending}
-                className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-black text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/20 disabled:opacity-50 cursor-pointer"
+                onClick={handlePollInbox}
+                disabled={inboxLoading}
+                className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#38BDF8]/50 text-[#38BDF8] font-bold text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
+                title="Odpytaj serwer IMAP w poszukiwaniu nowych odpowiedzi"
               >
-                <Send size={15} className={batchSending ? "animate-spin" : ""} />
-                {batchSending ? "Wysyłanie..." : `🚀 Wyślij wszystko (${pendingApprovalLeads.length})`}
+                <Inbox size={14} className={inboxLoading ? "animate-pulse" : ""} />
+                <span>{inboxLoading ? "Sprawdzanie..." : "Sprawdź IMAP"}</span>
+              </button>
+              <a
+                href="/api/export"
+                target="_blank"
+                className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#334155] text-white font-bold text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all"
+              >
+                <Download size={14} />
+                <span>Eksport Excel</span>
+              </a>
+              <button
+                onClick={fetchLeads}
+                className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#334155] text-white p-2 rounded-lg transition-all cursor-pointer"
+                title="Odśwież dane z bazy"
+              >
+                <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
               </button>
             </div>
           </div>
-        )}
+        </header>
 
-        {/* NAVIGATION TABS */}
-        <div className="flex border-b border-[#28354D] gap-2 mb-6 overflow-x-auto pb-1">
-          <button
-            onClick={() => setActiveTab("crm")}
-            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all ${
-              activeTab === "crm"
-                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
-                : "text-[#94A3B8] hover:text-white"
-            }`}
-          >
-            <Building size={16} />
-            Pipeline CRM & Tabela
-          </button>
-          <button
-            onClick={() => setActiveTab("generator")}
-            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all ${
-              activeTab === "generator"
-                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
-                : "text-[#94A3B8] hover:text-white"
-            }`}
-          >
-            <Search size={16} />
-            Lead Generator & Scraper
-          </button>
-          <button
-            onClick={() => setActiveTab("outreach")}
-            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all relative ${
-              activeTab === "outreach"
-                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
-                : "text-[#94A3B8] hover:text-white"
-            }`}
-          >
-            <Send size={16} />
-            <span>Zatwierdzanie Ofert & Wysyłka</span>
-            {pendingApprovalLeads.length > 0 && (
-              <span className="bg-[#FFE600] text-black text-[10px] font-black px-2 py-0.5 rounded-full">
-                {pendingApprovalLeads.length}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("history")}
-            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all relative ${
-              activeTab === "history"
-                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
-                : "text-[#94A3B8] hover:text-white"
-            }`}
-          >
-            <History size={16} />
-            <span>Baza Wysłanych & Metryki</span>
-            {historyMetrics && historyMetrics.totalOutreached > 0 && (
-              <span className="bg-[#38BDF8]/20 text-[#38BDF8] border border-[#38BDF8]/40 text-[10px] font-black px-2 py-0.5 rounded-full">
-                {historyMetrics.totalOutreached}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab("review")}
-            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all ${
-              activeTab === "review"
-                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
-                : "text-[#94A3B8] hover:text-white"
-            }`}
-          >
-            <AlertTriangle size={16} />
-            Kolejka Kwalifikacji ({metrics.needsReview})
-          </button>
-          <button
-            onClick={() => setActiveTab("settings")}
-            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all ${
-              activeTab === "settings"
-                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
-                : "text-[#94A3B8] hover:text-white"
-            }`}
-          >
-            <SettingsIcon size={16} />
-            Ustawienia & Reguły
-          </button>
-          <button
-            onClick={() => setActiveTab("team")}
-            className={`px-5 py-2.5 rounded-t-lg font-extrabold text-sm flex items-center gap-2 transition-all ${
-              activeTab === "team"
-                ? "bg-[#141C2E] text-[#FFE600] border-t-2 border-x border-[#FFE600]"
-                : "text-[#94A3B8] hover:text-white"
-            }`}
-          >
-            <Users size={16} />
-            Zespół & Zaproszenia
-          </button>
-        </div>
+        {/* METRIC STRIP */}
+        <section className="bg-[#101726] border-b border-[#28354D] py-3.5 px-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+            <div className="bg-[#141C2E] border border-[#28354D] p-3 rounded-xl">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Wszystkie Leady</span>
+              <div className="text-xl font-black text-white mt-0.5">{metrics.total}</div>
+            </div>
+            <div className="bg-[#141C2E] border border-[#28354D] p-3 rounded-xl">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#34D399]">Zakwalifikowane</span>
+              <div className="text-xl font-black text-[#34D399] mt-0.5">{metrics.qualified}</div>
+            </div>
+            <div
+              onClick={() => setActiveTab("outreach")}
+              className="bg-[#141C2E] border-2 border-[#FFE600]/80 p-3 rounded-xl cursor-pointer hover:bg-[#1E293B] transition-all group"
+              title="Kliknij, aby przejść do zatwierdzania i wysyłki ofert"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#FFE600]">
+                  Do Wysyłki (AI Act)
+                </span>
+                <span className="text-[8px] bg-[#FFE600] text-black font-extrabold px-1.5 py-0.2 rounded">
+                  AUDYT
+                </span>
+              </div>
+              <div className="text-xl font-black text-[#FFE600] mt-0.5 flex items-center justify-between">
+                <span>{metrics.readyToSend}</span>
+                <ArrowRight size={15} className="text-[#FFE600] group-hover:translate-x-1 transition-transform" />
+              </div>
+            </div>
+            <div className="bg-[#141C2E] border border-[#28354D] p-3 rounded-xl">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#38BDF8]">Oferty WWW</span>
+              <div className="text-xl font-black text-[#38BDF8] mt-0.5">{metrics.offersPublished}</div>
+            </div>
+            <div className="bg-[#141C2E] border border-[#28354D] p-3 rounded-xl">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#C084FC]">Wysłane Wiadomości</span>
+              <div className="text-xl font-black text-[#C084FC] mt-0.5">{metrics.emailsSent}</div>
+            </div>
+            <div className="bg-[#141C2E] border border-[#28354D] p-3 rounded-xl">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-[#FBBF24]">Weryfikacja Leada</span>
+              <div className="text-xl font-black text-[#FBBF24] mt-0.5">{metrics.needsReview}</div>
+            </div>
+          </div>
+        </section>
+
+        {/* MAIN CONTAINER */}
+        <main className="p-4 sm:p-6 flex-1">
+          {/* BANNER: AI ACT HUMAN OVERSIGHT ALERT */}
+          {pendingApprovalLeads.length > 0 && (
+            <div className="mb-6 bg-gradient-to-r from-[#141C2E] via-[#1A2338] to-[#141C2E] border-2 border-[#FFE600]/70 p-4 sm:p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-xl shadow-yellow-500/5">
+              <div className="flex items-start gap-3.5">
+                <div className="p-3 bg-[#FFE600]/10 border border-[#FFE600]/30 text-[#FFE600] rounded-xl shrink-0 mt-0.5">
+                  <ShieldCheck size={26} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="bg-[#FFE600] text-black text-[10px] font-black uppercase px-2 py-0.5 rounded tracking-wider">
+                      AI Act Art. 14 • Maszyna Wstrzymana
+                    </span>
+                    <span className="text-xs text-[#38BDF8] font-bold">
+                      Oczekiwanie na akceptację człowieka
+                    </span>
+                  </div>
+                  <h3 className="text-base font-extrabold text-white mt-1">
+                    {pendingApprovalLeads.length} wygenerowanych ofert i maili czeka na Twoje sprawdzenie
+                  </h3>
+                  <p className="text-xs text-[#94A3B8] mt-0.5">
+                    Automatyczna wysyłka została zatrzymana. Możesz przejrzeć każdą stronę oferty WWW, sprawdzić treść maila i kliknąć „Wyślij wszystko” jednym guzikiem.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 shrink-0 self-end md:self-center">
+                <button
+                  onClick={() => setActiveTab("outreach")}
+                  className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8] text-[#38BDF8] hover:text-white font-extrabold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 transition-all cursor-pointer"
+                >
+                  <Eye size={15} /> Przejrzyj oferty i maile
+                </button>
+                <button
+                  onClick={() => handleSendAll()}
+                  disabled={batchSending}
+                  className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-black text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/20 disabled:opacity-50 cursor-pointer"
+                >
+                  <Send size={15} className={batchSending ? "animate-spin" : ""} />
+                  {batchSending ? "Wysyłanie..." : `🚀 Wyślij wszystko (${pendingApprovalLeads.length})`}
+                </button>
+              </div>
+            </div>
+          )}
 
         {/* TAB 1: CRM & EDITABLE TABLE */}
         {activeTab === "crm" && (
           <div className="space-y-4">
+            {/* Quick Filter Pills */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
+              <span className="text-[#64748B] font-semibold text-[11px] uppercase tracking-wider flex items-center gap-1 shrink-0">
+                <Filter size={12} /> Szybkie filtry:
+              </span>
+              {[
+                { id: "all", label: "Wszystkie", count: quickFilterCounts.all, color: "hover:border-[#94A3B8]" },
+                { id: "pending_approval", label: "🛡️ Do zatwierdzenia AI", count: quickFilterCounts.pending_approval, color: "hover:border-amber-400 text-amber-300" },
+                { id: "needs_review", label: "⚠️ Do weryfikacji", count: quickFilterCounts.needs_review, color: "hover:border-orange-400 text-orange-300" },
+                { id: "qualified", label: "✅ Zakwalifikowane", count: quickFilterCounts.qualified, color: "hover:border-emerald-400 text-emerald-300" },
+                { id: "in_sequence", label: "📬 W sekwencji", count: quickFilterCounts.in_sequence, color: "hover:border-purple-400 text-purple-300" },
+                { id: "with_offer", label: "📄 Z ofertą", count: quickFilterCounts.with_offer, color: "hover:border-sky-400 text-sky-300" },
+                { id: "with_email", label: "📧 Z e-mailem", count: quickFilterCounts.with_email, color: "hover:border-[#FFE600] text-[#FFE600]" },
+              ].map((pill) => {
+                const isActive = quickFilter === pill.id;
+                return (
+                  <button
+                    key={pill.id}
+                    onClick={() => {
+                      setQuickFilter(pill.id as any);
+                      setCurrentPage(1);
+                    }}
+                    className={`px-3 py-1.5 rounded-lg border font-medium transition-all flex items-center gap-2 shrink-0 cursor-pointer ${
+                      isActive
+                        ? "bg-[#FFE600] text-black border-[#FFE600] font-bold shadow-md shadow-[#FFE600]/10"
+                        : `bg-[#0E1422] border-[#28354D] text-[#94A3B8] hover:text-white ${pill.color}`
+                    }`}
+                  >
+                    <span>{pill.label}</span>
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold ${
+                        isActive ? "bg-black/20 text-black" : "bg-[#1E293B] text-[#CBD5E1]"
+                      }`}
+                    >
+                      {pill.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Selection Banner */}
+            {selectedCrmLeadIds.length > 0 && (
+              <div className="bg-amber-950/40 border border-amber-600/40 rounded-xl px-4 py-2.5 flex items-center justify-between text-xs text-amber-200">
+                <div className="flex items-center gap-3">
+                  <CheckSquare size={16} className="text-[#FFE600]" />
+                  <span>
+                    Zaznaczono <strong className="text-white font-mono">{selectedCrmLeadIds.length}</strong> z{" "}
+                    <strong className="text-white font-mono">{sortedLeads.length}</strong> przefiltrowanych leadów
+                  </span>
+                  {selectedCrmLeadIds.length < sortedLeads.length && (
+                    <button
+                      onClick={selectAllFiltered}
+                      className="text-[#FFE600] underline font-bold hover:text-white cursor-pointer ml-2"
+                    >
+                      Zaznacz wszystkie {sortedLeads.length} leadów
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={clearCrmSelection}
+                  className="text-[#94A3B8] hover:text-white underline cursor-pointer"
+                >
+                  Wyczyść zaznaczenie
+                </button>
+              </div>
+            )}
+
             {/* Filter Toolbar */}
             <div className="bg-[#141C2E] border border-[#28354D] p-4 rounded-xl flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
@@ -1885,7 +2726,10 @@ export default function LeadMachineDashboard() {
                     type="text"
                     placeholder="Szukaj firmy po nazwie, branży, telefonie, emailu..."
                     value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setCurrentPage(1);
+                    }}
                     className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-[#64748B] focus:outline-none focus:border-[#FFE600]"
                   />
                 </div>
@@ -1893,10 +2737,13 @@ export default function LeadMachineDashboard() {
                 {/* City Filter */}
                 <select
                   value={cityFilter}
-                  onChange={(e) => setCityFilter(e.target.value)}
+                  onChange={(e) => {
+                    setCityFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                 >
-                  <option value="all">Wszystkie Miasta (≤30km)</option>
+                  <option value="all">Wszystkie Miasta</option>
                   {cities.map((c) => (
                     <option key={c} value={c}>
                       {c}
@@ -1907,23 +2754,30 @@ export default function LeadMachineDashboard() {
                 {/* Status Filter */}
                 <select
                   value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                 >
                   <option value="all">Wszystkie Statusy</option>
-                  <option value="new">Nowe (new)</option>
-                  <option value="qualified">Zakwalifikowane (qualified)</option>
-                  <option value="needs_review">Do weryfikacji (needs_review)</option>
-                  <option value="offer_published">Oferta gotowa (offer_published)</option>
-                  <option value="sent">E-mail wysłany (sent)</option>
-                  <option value="followup_sent">Follow-up wysłany (followup_sent)</option>
-                  <option value="disqualified">Odrzucone (disqualified)</option>
+                  <option value="pending_approval">🛡️ Do Zatwierdzenia AI Act (pending_approval)</option>
+                  <option value="needs_review">⚠️ Do Weryfikacji (needs_review)</option>
+                  <option value="qualified">✅ Zakwalifikowane (qualified)</option>
+                  <option value="new">🆕 Nowe (new)</option>
+                  <option value="in_sequence">📬 W Sekwencji Outreach (in_sequence)</option>
+                  <option value="replied_interested">💬 Odpowiedź: Zainteresowany</option>
+                  <option value="meeting_booked">🏆 Umówione Spotkanie</option>
+                  <option value="offer_published">📄 Oferta Opublikowana</option>
+                  <option value="sent">📧 E-mail Wysłany</option>
+                  <option value="followup_sent">🔄 Follow-up Wysłany</option>
+                  <option value="disqualified">❌ Odrzucone (disqualified)</option>
                 </select>
               </div>
 
               <div className="text-xs text-[#94A3B8]">
-                Wyświetlanie <strong className="text-white">{filteredLeads.length}</strong> z{" "}
-                <strong className="text-white">{leads.length}</strong> leadów
+                Wyświetlanie <strong className="text-white">{paginatedLeads.length}</strong> z{" "}
+                <strong className="text-white">{sortedLeads.length}</strong> (łącznie {leads.length})
               </div>
             </div>
 
@@ -1933,12 +2787,94 @@ export default function LeadMachineDashboard() {
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
                     <tr className="border-b border-[#28354D] bg-[#0E1422] text-[#94A3B8] text-[11px] uppercase tracking-wider font-extrabold">
-                      <th className="p-3.5">ID</th>
-                      <th className="p-3.5">Firma</th>
-                      <th className="p-3.5">Lokalizacja</th>
+                      {/* Checkbox column */}
+                      <th className="p-3.5 w-10 text-center">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleSelectAllVisible();
+                          }}
+                          className="text-[#94A3B8] hover:text-[#FFE600] transition-colors p-0.5 cursor-pointer block mx-auto"
+                          title={allVisibleSelected ? "Odznacz widoczne" : "Zaznacz widoczne"}
+                        >
+                          {allVisibleSelected ? (
+                            <CheckSquare size={17} className="text-[#FFE600]" />
+                          ) : someVisibleSelected ? (
+                            <div className="w-4 h-4 rounded border-2 border-[#FFE600] bg-[#FFE600]/20 flex items-center justify-center">
+                              <div className="w-2 h-0.5 bg-[#FFE600]" />
+                            </div>
+                          ) : (
+                            <Square size={17} />
+                          )}
+                        </button>
+                      </th>
+                      <th
+                        className="p-3.5 cursor-pointer select-none hover:text-white transition-colors"
+                        onClick={() => handleSort("id")}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>ID</span>
+                          {sortField === "id" ? (
+                            sortDirection === "asc" ? <ArrowUp size={13} className="text-[#FFE600]" /> : <ArrowDown size={13} className="text-[#FFE600]" />
+                          ) : (
+                            <ArrowUpDown size={12} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        className="p-3.5 cursor-pointer select-none hover:text-white transition-colors min-w-[200px]"
+                        onClick={() => handleSort("companyName")}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>Firma</span>
+                          {sortField === "companyName" ? (
+                            sortDirection === "asc" ? <ArrowUp size={13} className="text-[#FFE600]" /> : <ArrowDown size={13} className="text-[#FFE600]" />
+                          ) : (
+                            <ArrowUpDown size={12} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        className="p-3.5 cursor-pointer select-none hover:text-white transition-colors"
+                        onClick={() => handleSort("city")}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>Lokalizacja</span>
+                          {sortField === "city" ? (
+                            sortDirection === "asc" ? <ArrowUp size={13} className="text-[#FFE600]" /> : <ArrowDown size={13} className="text-[#FFE600]" />
+                          ) : (
+                            <ArrowUpDown size={12} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
                       <th className="p-3.5">Branża</th>
-                      <th className="p-3.5">Status</th>
-                      <th className="p-3.5 text-center">Score</th>
+                      <th
+                        className="p-3.5 cursor-pointer select-none hover:text-white transition-colors"
+                        onClick={() => handleSort("status")}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span>Status</span>
+                          {sortField === "status" ? (
+                            sortDirection === "asc" ? <ArrowUp size={13} className="text-[#FFE600]" /> : <ArrowDown size={13} className="text-[#FFE600]" />
+                          ) : (
+                            <ArrowUpDown size={12} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
+                      <th
+                        className="p-3.5 text-center cursor-pointer select-none hover:text-white transition-colors"
+                        onClick={() => handleSort("score")}
+                      >
+                        <div className="flex items-center justify-center gap-1.5">
+                          <span>Score</span>
+                          {sortField === "score" ? (
+                            sortDirection === "asc" ? <ArrowUp size={13} className="text-[#FFE600]" /> : <ArrowDown size={13} className="text-[#FFE600]" />
+                          ) : (
+                            <ArrowUpDown size={12} className="opacity-40" />
+                          )}
+                        </div>
+                      </th>
                       <th className="p-3.5">Kontakt</th>
                       <th className="p-3.5">Oferta WWW</th>
                       <th className="p-3.5">E-mail</th>
@@ -1946,22 +2882,50 @@ export default function LeadMachineDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#1E293B]">
-                    {filteredLeads.length === 0 ? (
+                    {paginatedLeads.length === 0 ? (
                       <tr>
-                        <td colSpan={10} className="p-8 text-center text-[#94A3B8]">
-                          Brak leadów spełniających kryteria. Użyj generatora lub zaimportuj plik.
+                        <td colSpan={11} className="py-16 px-4 text-center">
+                          <div className="max-w-md mx-auto flex flex-col items-center justify-center space-y-3">
+                            <div className="w-12 h-12 rounded-full bg-[#1E293B] border border-[#334155] flex items-center justify-center text-[#94A3B8]">
+                              <Search size={22} />
+                            </div>
+                            <div className="text-white font-bold text-base">Brak leadów spełniających kryteria</div>
+                            <p className="text-xs text-[#94A3B8] leading-relaxed">
+                              {search || cityFilter !== "all" || statusFilter !== "all" || quickFilter !== "all"
+                                ? "Zastosowane filtry lub wyszukiwana fraza nie dopasowały żadnych rekordów w bazie CRM."
+                                : "Brak zapisanych rekordów. Użyj generatora leadów lub zaimportuj plik CSV."}
+                            </p>
+                            {(search || cityFilter !== "all" || statusFilter !== "all" || quickFilter !== "all") && (
+                              <button
+                                onClick={() => {
+                                  setSearch("");
+                                  setCityFilter("all");
+                                  setStatusFilter("all");
+                                  setQuickFilter("all");
+                                  setCurrentPage(1);
+                                }}
+                                className="mt-2 bg-[#FFE600] hover:bg-[#FACC15] text-black text-xs font-bold px-4 py-2 rounded-lg transition-all cursor-pointer shadow-md"
+                              >
+                                Wyczyść filtry i wyszukiwanie
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ) : (
-                      filteredLeads.map((lead) => {
+                      paginatedLeads.map((lead) => {
                         const isEditing = editingId === lead.id;
+                        const isSelected = selectedCrmLeadIds.includes(lead.id);
 
                         return (
                           <tr
                             key={lead.id}
-                            className="hover:bg-[#182338] transition-colors cursor-pointer group"
+                            className={`transition-colors cursor-pointer group ${
+                              isSelected
+                                ? "bg-[#182338]/90 hover:bg-[#1E2B45] border-l-4 border-l-[#FFE600]"
+                                : "hover:bg-[#182338]"
+                            }`}
                             onClick={(e) => {
-                              // If clicked on input/button, don't open drawer
                               const target = e.target as HTMLElement;
                               if (target.tagName === "INPUT" || target.tagName === "SELECT" || target.tagName === "BUTTON" || target.tagName === "A") {
                                 return;
@@ -1969,6 +2933,21 @@ export default function LeadMachineDashboard() {
                               setSelectedLead(lead);
                             }}
                           >
+                            {/* Checkbox */}
+                            <td className="p-3.5 text-center w-10" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => toggleSelectLead(lead.id)}
+                                className="text-[#94A3B8] hover:text-[#FFE600] transition-colors p-0.5 cursor-pointer block mx-auto"
+                              >
+                                {isSelected ? (
+                                  <CheckSquare size={17} className="text-[#FFE600]" />
+                                ) : (
+                                  <Square size={17} />
+                                )}
+                              </button>
+                            </td>
+
                             <td className="p-3.5 text-[#64748B] font-mono text-xs">#{lead.id}</td>
 
                             {/* Company Name (Editable) */}
@@ -2023,7 +3002,7 @@ export default function LeadMachineDashboard() {
                                 />
                               ) : (
                                 <div>
-                                  <strong>{lead.city || "Legnica"}</strong>
+                                  <strong>{lead.city || targetingSettings.defaultCity || "—"}</strong>
                                   <span className="text-[#94A3B8] block text-[11px]">
                                     {lead.distanceKm != null ? `${lead.distanceKm.toFixed(1)} km` : ""}
                                   </span>
@@ -2049,8 +3028,12 @@ export default function LeadMachineDashboard() {
                                   className="bg-[#0A0E17] border border-[#FFE600] rounded px-2 py-1 text-xs text-white"
                                 >
                                   <option value="new">new</option>
-                                  <option value="qualified">qualified</option>
                                   <option value="needs_review">needs_review</option>
+                                  <option value="qualified">qualified</option>
+                                  <option value="pending_approval">pending_approval</option>
+                                  <option value="in_sequence">in_sequence</option>
+                                  <option value="replied_interested">replied_interested</option>
+                                  <option value="meeting_booked">meeting_booked</option>
                                   <option value="offer_published">offer_published</option>
                                   <option value="sent">sent</option>
                                   <option value="followup_sent">followup_sent</option>
@@ -2059,10 +3042,18 @@ export default function LeadMachineDashboard() {
                               ) : (
                                 <span
                                   className={`px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider ${
-                                    lead.status === "qualified"
+                                    lead.status === "pending_approval"
+                                      ? "bg-amber-950/80 text-[#FFE600] border border-[#FFE600]/70 shadow-sm"
+                                      : lead.status === "qualified"
                                       ? "bg-emerald-950/80 text-emerald-400 border border-emerald-700/60"
                                       : lead.status === "needs_review"
                                       ? "bg-amber-950/80 text-amber-400 border border-amber-700/60"
+                                      : lead.status === "in_sequence"
+                                      ? "bg-purple-950/80 text-purple-300 border border-purple-700/60"
+                                      : lead.status === "replied_interested"
+                                      ? "bg-emerald-900/80 text-emerald-300 border border-emerald-500"
+                                      : lead.status === "meeting_booked"
+                                      ? "bg-[#FFE600] text-black border border-[#FFE600] font-black"
                                       : lead.status === "disqualified"
                                       ? "bg-rose-950/80 text-rose-400 border border-rose-700/60"
                                       : lead.status === "offer_published"
@@ -2074,7 +3065,7 @@ export default function LeadMachineDashboard() {
                                       : "bg-[#1E293B] text-white border border-[#334155]"
                                   }`}
                                 >
-                                  {lead.status}
+                                  {lead.status === "pending_approval" ? "Do zatwierdzenia" : lead.status}
                                 </span>
                               )}
                             </td>
@@ -2230,7 +3221,229 @@ export default function LeadMachineDashboard() {
                   </tbody>
                 </table>
               </div>
+
+              {/* Pagination Bar */}
+              <div className="bg-[#0E1422] border-t border-[#28354D] px-4 py-3 flex flex-wrap items-center justify-between gap-4 text-xs">
+                <div className="flex items-center gap-3 text-[#94A3B8]">
+                  <span>
+                    Strona <strong className="text-white font-mono">{currentPage}</strong> z{" "}
+                    <strong className="text-white font-mono">{totalPages}</strong> ({sortedLeads.length} leadów)
+                  </span>
+                  <span className="text-[#475569]">|</span>
+                  <div className="flex items-center gap-1.5">
+                    <span>Wierszy na stronę:</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => {
+                        setPageSize(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      className="bg-[#0A0E17] border border-[#28354D] rounded px-2 py-1 text-white text-xs focus:outline-none focus:border-[#FFE600]"
+                    >
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                      <option value={-1}>Wszystkie ({sortedLeads.length})</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={currentPage <= 1 || pageSize === -1}
+                    className="p-1.5 rounded-lg border border-[#28354D] text-[#94A3B8] hover:text-white hover:border-[#64748B] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    title="Poprzednia strona"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+
+                  {pageSize !== -1 && totalPages > 1 && (
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        let pageNum = i + 1;
+                        if (totalPages > 5 && currentPage > 3) {
+                          pageNum = Math.min(currentPage - 2 + i, totalPages - 4 + i);
+                        }
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => setCurrentPage(pageNum)}
+                            className={`w-7 h-7 rounded-lg text-xs font-mono font-bold transition-all ${
+                              currentPage === pageNum
+                                ? "bg-[#FFE600] text-black"
+                                : "bg-[#141C2E] border border-[#28354D] text-[#94A3B8] hover:text-white"
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={currentPage >= totalPages || pageSize === -1}
+                    className="p-1.5 rounded-lg border border-[#28354D] text-[#94A3B8] hover:text-white hover:border-[#64748B] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    title="Następna strona"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
             </div>
+
+            {/* FLOATING BULK BAR */}
+            {selectedCrmLeadIds.length > 0 && (
+              <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-[#0F172A]/95 backdrop-blur-md border-2 border-[#FFE600] rounded-2xl shadow-2xl px-5 py-3 flex items-center gap-3 text-xs max-w-4xl w-[95%] sm:w-auto animate-in slide-in-from-bottom-5 duration-200">
+                <div className="flex items-center gap-2 pr-3 border-r border-[#28354D] shrink-0">
+                  <div className="w-6 h-6 rounded-full bg-[#FFE600] text-black font-black font-mono text-[11px] flex items-center justify-center shadow">
+                    {selectedCrmLeadIds.length}
+                  </div>
+                  <span className="text-white font-bold hidden sm:inline">zaznaczonych</span>
+                </div>
+
+                {bulkProcessing ? (
+                  <div className="flex items-center gap-2 text-[#FFE600] font-semibold py-1">
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>
+                      {bulkProcessing.label}... ({bulkProcessing.current}/{bulkProcessing.total})
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      onClick={handleBulkAudit}
+                      className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#28354D] hover:border-[#38BDF8] text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Uruchom audyt WWW dla zaznaczonych leadów ze stronami"
+                    >
+                      <Globe size={13} className="text-[#38BDF8]" />
+                      <span>Skanuj WWW</span>
+                    </button>
+
+                    <button
+                      onClick={handleBulkGenerateOffers}
+                      className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#28354D] hover:border-amber-400 text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Wygeneruj spersonalizowane oferty dla wybranych firm"
+                    >
+                      <Sparkles size={13} className="text-amber-400" />
+                      <span>Generuj Oferty</span>
+                    </button>
+
+                    <button
+                      onClick={handleBulkQualify}
+                      className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#28354D] hover:border-emerald-400 text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Przelicz scoring ICP i zaktualizuj kwalifikację"
+                    >
+                      <Zap size={13} className="text-emerald-400" />
+                      <span>Scoring & Kwalifikacja</span>
+                    </button>
+
+                    <button
+                      onClick={() => setBulkStatusModal(true)}
+                      className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#28354D] hover:border-purple-400 text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Zmień status dla wszystkich zaznaczonych"
+                    >
+                      <Tag size={13} className="text-purple-400" />
+                      <span>Zmień Status</span>
+                    </button>
+
+                    <button
+                      onClick={handleBulkExport}
+                      className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#28354D] hover:border-[#FFE600] text-white px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Pobierz arkusz Excel z danymi zaznaczonych leadów"
+                    >
+                      <Download size={13} className="text-[#FFE600]" />
+                      <span>Eksport (.xlsx)</span>
+                    </button>
+
+                    <button
+                      onClick={handleBulkDelete}
+                      className="bg-rose-950/60 hover:bg-rose-900 border border-rose-800 text-rose-200 px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer"
+                      title="Usuń trwale zaznaczone firmy"
+                    >
+                      <Trash2 size={13} />
+                      <span>Usuń</span>
+                    </button>
+
+                    <button
+                      onClick={clearCrmSelection}
+                      className="text-[#94A3B8] hover:text-white p-1.5 rounded-lg hover:bg-[#1E293B] transition-all ml-1 cursor-pointer"
+                      title="Odznacz wszystkie"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* MODAL: MASOWA ZMIANA STATUSU (BULK STATUS MODAL) */}
+            {bulkStatusModal && (
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                <div className="max-w-md w-full bg-[#101726] border border-[#28354D] rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+                  <div className="bg-[#141C2E] border-b border-[#28354D] p-5 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-base font-black text-white flex items-center gap-2">
+                        <Tag size={18} className="text-[#FFE600]" />
+                        Masowa zmiana statusu
+                      </h3>
+                      <p className="text-xs text-[#94A3B8] mt-0.5">
+                        Zaznaczono <strong className="text-white">{selectedCrmLeadIds.length}</strong> firm
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setBulkStatusModal(false)}
+                      className="text-[#94A3B8] hover:text-white p-1.5 rounded-lg hover:bg-[#1E293B] transition-all cursor-pointer"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  <div className="p-5 space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-[#CBD5E1] uppercase tracking-wider mb-2">
+                        Wybierz nowy status:
+                      </label>
+                      <select
+                        value={targetBulkStatus}
+                        onChange={(e) => setTargetBulkStatus(e.target.value)}
+                        className="w-full bg-[#0A0E17] border border-[#28354D] rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                      >
+                        <option value="pending_approval">🛡️ Do Zatwierdzenia AI Act (pending_approval)</option>
+                        <option value="needs_review">⚠️ Do Weryfikacji (needs_review)</option>
+                        <option value="qualified">✅ Zakwalifikowane (qualified)</option>
+                        <option value="new">🆕 Nowe (new)</option>
+                        <option value="in_sequence">📬 W Sekwencji Outreach (in_sequence)</option>
+                        <option value="disqualified">❌ Odrzucone (disqualified)</option>
+                        <option value="replied_interested">💬 Odpowiedź: Zainteresowany</option>
+                        <option value="meeting_booked">🏆 Umówione Spotkanie</option>
+                      </select>
+                    </div>
+
+                    <p className="text-[11px] text-[#94A3B8] leading-relaxed bg-[#0A0E17] p-3 rounded-lg border border-[#1E293B]">
+                      ℹ️ Zmiana statusu wywoła masowe przejście w maszynie stanów z audytem w zdarzeniach leada (Invariant 3).
+                    </p>
+
+                    <div className="flex items-center justify-end gap-3 pt-2">
+                      <button
+                        onClick={() => setBulkStatusModal(false)}
+                        className="px-4 py-2 rounded-xl text-xs font-bold text-[#94A3B8] hover:text-white hover:bg-[#1E293B] transition-all cursor-pointer"
+                      >
+                        Anuluj
+                      </button>
+                      <button
+                        onClick={() => handleBulkChangeStatus(targetBulkStatus)}
+                        className="bg-[#FFE600] hover:bg-[#FACC15] text-black px-5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer shadow-lg shadow-[#FFE600]/20"
+                      >
+                        Zatwierdź zmianę ({selectedCrmLeadIds.length})
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2325,7 +3538,7 @@ export default function LeadMachineDashboard() {
                   </div>
                   <h4 className="font-extrabold text-sm text-white">Wszystkie MŚP (Mikro + Małe)</h4>
                   <p className="text-xs text-[#94A3B8] mt-1">
-                    Pełen przekrój lokalnego rynku przedsiębiorstw w promieniu 30 km od Legnicy.
+                    Pełen przekrój rynku przedsiębiorstw w wybranym rejonie poszukiwań.
                   </p>
                   <div className="mt-3 text-[11px] text-[#38BDF8] flex items-center gap-1 font-semibold">
                     <CheckCircle2 size={12} /> Baza CEIDG + KRS + Google Places API
@@ -2592,22 +3805,25 @@ export default function LeadMachineDashboard() {
               </div>
             </div>
 
-            {/* CSV Import Section */}
+            {/* CSV Import Banner pointing to dedicated Import Hub */}
             <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
               <div>
                 <h3 className="text-base font-bold text-white flex items-center gap-2">
                   <Upload size={18} className="text-[#38BDF8]" />
-                  Importuj Bazę z Pliku CSV
+                  Posiadasz zewnętrzną bazę firm (CSV / Excel)?
                 </h3>
                 <p className="text-xs text-[#94A3B8] mt-1">
-                  Obsługuje pliki z Google Maps, Apify, PanoramaFirm lub CEIDG. Automatyczny filtr geo (Legnica ≤30km) i deduplikacja.
+                  Skorzystaj z dedykowanego modułu importu z automatycznym wykrywaniem kolumn, podglądem danych i deduplikacją.
                 </p>
               </div>
-              <label className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-xs px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-2 transition-all">
-                <Upload size={15} />
-                {csvUploading ? "Przetwarzanie..." : "Wybierz plik .CSV"}
-                <input type="file" accept=".csv" onChange={handleCsvFileUpload} disabled={csvUploading} className="hidden" />
-              </label>
+              <button
+                type="button"
+                onClick={() => setActiveTab("import")}
+                className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8] text-[#38BDF8] hover:text-white font-bold text-xs px-4 py-2.5 rounded-xl cursor-pointer flex items-center gap-2 transition-all shrink-0"
+              >
+                <FileSpreadsheet size={15} />
+                Przejdź do Importu CSV / Excel →
+              </button>
             </div>
 
             {/* Scraper Results Card */}
@@ -2650,12 +3866,230 @@ export default function LeadMachineDashboard() {
                     </span>
                   ) : (
                     <span className="bg-slate-800 text-slate-300 border border-slate-700 px-2.5 py-1 rounded font-bold">
-                      ℹ️ Katalog Regionalny (Legnica & Region)
+                      ℹ️ Wbudowany Katalog Przedsiębiorstw B2B
                     </span>
                   )}
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* TAB: DEDICATED CSV & EXCEL IMPORT (PROMPT 5) */}
+        {activeTab === "import" && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#28354D] pb-5">
+                <div>
+                  <h2 className="text-xl font-black text-white flex items-center gap-2">
+                    <Upload size={22} className="text-[#38BDF8]" />
+                    Import Bazy Przedsiębiorstw (CSV / Excel)
+                  </h2>
+                  <p className="text-xs text-[#94A3B8] mt-1">
+                    Wgraj plik z bazą firm z Google Maps, Apify, CEIDG, PanoramaFirm lub własnej bazy Excel. System automatycznie dopasuje kolumny i przeprowadzi deduplikację.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs bg-[#0E1422] border border-[#28354D] text-[#94A3B8] px-3 py-1.5 rounded-lg">
+                    Formaty: <strong className="text-white">.CSV, .XLSX, .XLS</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Drag & Drop Zone */}
+              <div
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const file = e.dataTransfer.files?.[0];
+                  if (file) handleProcessImportFile(file);
+                }}
+                className="mt-6 border-2 border-dashed border-[#28354D] hover:border-[#FFE600] rounded-2xl p-8 sm:p-12 text-center transition-all bg-[#0A0E17]/60 group cursor-pointer"
+                onClick={() => document.getElementById("csv-file-input")?.click()}
+              >
+                <input
+                  id="csv-file-input"
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleProcessImportFile(file);
+                  }}
+                  className="hidden"
+                />
+                <div className="w-16 h-16 rounded-2xl bg-[#141C2E] border border-[#28354D] group-hover:border-[#FFE600] flex items-center justify-center mx-auto text-[#38BDF8] group-hover:text-[#FFE600] transition-all shadow-lg">
+                  <FileSpreadsheet size={32} />
+                </div>
+                <h4 className="text-base font-bold text-white mt-4">
+                  Przeciągnij i upuść plik tutaj lub <span className="text-[#FFE600] underline">przeglądaj dysk</span>
+                </h4>
+                <p className="text-xs text-[#94A3B8] mt-1 max-w-md mx-auto">
+                  Obsługuje pliki rozdzielane przecinkami, średnikami oraz skoroszyty Excel (.xlsx, .xls).
+                </p>
+              </div>
+
+              {/* Import Configuration & Target Settings */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6 bg-[#0E1422] p-4 rounded-xl border border-[#28354D]">
+                <div>
+                  <label className="block text-xs font-bold text-[#CBD5E1] mb-1.5">
+                    Domyślne miasto (gdy puste):
+                  </label>
+                  <input
+                    type="text"
+                    value={importTargetCity}
+                    onChange={(e) => setImportTargetCity(e.target.value)}
+                    placeholder={targetingSettings.defaultCity || "Wrocław"}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-[#CBD5E1] mb-1.5">
+                    Województwo docelowe:
+                  </label>
+                  <select
+                    value={importTargetVoivodeship}
+                    onChange={(e) => setImportTargetVoivodeship(e.target.value)}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2 text-xs text-white outline-none focus:border-[#FFE600]"
+                  >
+                    {POLISH_VOIVODESHIPS.map((v) => (
+                      <option key={v.name} value={v.name}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center pt-5">
+                  <label className="flex items-center gap-2 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={importDeduplicate}
+                      onChange={(e) => setImportDeduplicate(e.target.checked)}
+                      className="accent-[#FFE600] w-4 h-4 rounded"
+                    />
+                    <span className="text-xs text-white font-semibold">
+                      Automatyczna deduplikacja (NIP / Telefon / Domena)
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* File Preview and Detected Columns Card */}
+              {importFile && importStats && (
+                <div className="mt-6 bg-[#0E1422] border border-[#28354D] p-5 rounded-xl space-y-4 animate-in fade-in duration-200">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#28354D] pb-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs bg-[#38BDF8]/20 text-[#38BDF8] border border-[#38BDF8]/40 px-2 py-0.5 rounded font-mono font-bold uppercase">
+                          {importFile.name.endsWith(".csv") ? "CSV" : "EXCEL"}
+                        </span>
+                        <span className="font-bold text-white text-sm">{importFile.name}</span>
+                      </div>
+                      <span className="text-xs text-[#94A3B8] font-mono mt-0.5 block">
+                        Rozmiar: {(importStats.fileSizeKb / 1024).toFixed(2)} MB • Liczba wierszy: {importStats.totalRows}
+                      </span>
+                    </div>
+
+                    <button
+                      onClick={handleExecuteImport}
+                      disabled={importRunning}
+                      className="bg-[#FFE600] hover:bg-[#FACC15] text-black font-black text-xs px-6 py-2.5 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-[#FFE600]/20 disabled:opacity-50 transition-all cursor-pointer"
+                    >
+                      <Upload size={15} className={importRunning ? "animate-spin" : ""} />
+                      {importRunning ? "Importowanie do CRM..." : `Zatwierdź i Zaimportuj (${importStats.totalRows} firm)`}
+                    </button>
+                  </div>
+
+                  {/* Detected column badges */}
+                  <div>
+                    <span className="text-xs text-[#94A3B8] block mb-2 font-bold uppercase tracking-wider">
+                      Rozpoznane kolumny danych:
+                    </span>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {Object.entries(importDetectedHeaders).map(([field, orig]) => (
+                        <span
+                          key={field}
+                          className="bg-[#141C2E] border border-[#38BDF8]/40 text-[#38BDF8] px-2.5 py-1 rounded-lg flex items-center gap-1.5"
+                        >
+                          <CheckCircle2 size={12} className="text-emerald-400" />
+                          <strong>{field}:</strong> {orig}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Preview Table (First 5 rows) */}
+                  {importPreviewRows.length > 0 && (
+                    <div>
+                      <span className="text-xs text-[#94A3B8] block mb-2 font-bold uppercase tracking-wider">
+                        Podgląd pierwszych wierszy:
+                      </span>
+                      <div className="overflow-x-auto rounded-lg border border-[#28354D]">
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead>
+                            <tr className="bg-[#141C2E] text-[#94A3B8] font-bold border-b border-[#28354D]">
+                              <th className="p-2.5">Firma</th>
+                              <th className="p-2.5">Miasto</th>
+                              <th className="p-2.5">Telefon</th>
+                              <th className="p-2.5">Strona WWW</th>
+                              <th className="p-2.5">NIP</th>
+                              <th className="p-2.5">Branża</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-[#1E293B]">
+                            {importPreviewRows.map((row, idx) => (
+                              <tr key={idx} className="hover:bg-[#141C2E]">
+                                <td className="p-2.5 font-bold text-white">{row.companyName}</td>
+                                <td className="p-2.5 text-[#CBD5E1]">{row.city || "—"}</td>
+                                <td className="p-2.5 text-[#94A3B8] font-mono">{row.phone || "—"}</td>
+                                <td className="p-2.5 text-[#38BDF8] truncate max-w-[150px]">{row.website || "—"}</td>
+                                <td className="p-2.5 font-mono text-[#94A3B8]">{row.nip || "—"}</td>
+                                <td className="p-2.5 text-[#94A3B8]">{row.industry || "—"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Post-Import Report Card */}
+              {importReport && (
+                <div className="mt-6 bg-[#0E1422] border border-[#059669] p-6 rounded-2xl animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <CheckCircle2 size={24} className="text-[#34D399]" />
+                    <h3 className="text-base font-bold text-white">Import bazy zakończony pomyślnie</h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center text-xs">
+                    <div className="bg-[#141C2E] p-4 rounded-xl border border-emerald-800">
+                      <span className="text-[#94A3B8] block mb-1">Dodano nowych firm</span>
+                      <div className="text-2xl font-black text-[#34D399]">+{importReport.added}</div>
+                    </div>
+                    <div className="bg-[#141C2E] p-4 rounded-xl border border-[#28354D]">
+                      <span className="text-[#94A3B8] block mb-1">Pominięte duplikaty</span>
+                      <div className="text-2xl font-black text-white">{importReport.duplicates}</div>
+                    </div>
+                    <div className="bg-[#141C2E] p-4 rounded-xl border border-[#28354D]">
+                      <span className="text-[#94A3B8] block mb-1">Odrzucone poza zakresem</span>
+                      <div className="text-2xl font-black text-[#94A3B8]">{importReport.rejectedRadius || 0}</div>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      onClick={() => setActiveTab("crm")}
+                      className="bg-[#FFE600] hover:bg-[#FACC15] text-black font-extrabold text-xs px-5 py-2.5 rounded-xl transition-all cursor-pointer shadow-md"
+                    >
+                      Przejdź do tabeli CRM →
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -4532,6 +5966,7 @@ export default function LeadMachineDashboard() {
           </div>
         )}
       </main>
+      </div>
 
       {/* SLIDE-OVER DOSSIER DRAWER */}
       {selectedLead && (
@@ -4543,17 +5978,41 @@ export default function LeadMachineDashboard() {
                 <span className="text-xs text-[#64748B] font-mono">ID: #{selectedLead.id}</span>
                 <h2 className="text-2xl font-black text-white">{selectedLead.companyName}</h2>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="text-xs text-[#94A3B8]">{selectedLead.city || "Legnica"}</span>
+                  <span className="text-xs text-[#94A3B8]">{selectedLead.city || targetingSettings.defaultCity || "Polska"}</span>
                   <span className="text-xs text-[#64748B]">•</span>
                   <span className="text-xs text-[#FFE600] font-bold">{selectedLead.industry}</span>
                 </div>
               </div>
-              <button
-                onClick={() => setSelectedLead(null)}
-                className="p-2 rounded-lg bg-[#1E293B] hover:bg-[#334155] text-white transition-all"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center bg-[#141C2E] border border-[#28354D] rounded-lg p-0.5 text-xs">
+                  <button
+                    onClick={goToPrevLead}
+                    disabled={!hasPrevLead}
+                    className="p-1.5 rounded hover:bg-[#1E293B] text-[#94A3B8] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                    title="Poprzedni lead (←)"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span className="px-2 text-[11px] font-mono text-[#94A3B8] select-none">
+                    {currentLeadIndex !== -1 ? `${currentLeadIndex + 1} / ${sortedLeads.length}` : "—"}
+                  </span>
+                  <button
+                    onClick={goToNextLead}
+                    disabled={!hasNextLead}
+                    className="p-1.5 rounded hover:bg-[#1E293B] text-[#94A3B8] hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
+                    title="Następny lead (→)"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+                <button
+                  onClick={() => setSelectedLead(null)}
+                  className="p-2 rounded-lg bg-[#1E293B] hover:bg-[#334155] text-[#94A3B8] hover:text-white transition-all cursor-pointer"
+                  title="Zamknij (Esc)"
+                >
+                  <X size={18} />
+                </button>
+              </div>
             </div>
 
             {/* Drawer Tabs */}
@@ -5207,34 +6666,32 @@ export default function LeadMachineDashboard() {
                 ) : (
                   <>
                     {/* Status Banner */}
-                    {selectedLead.status === "followup_sent" ? (
+                    {outreachData?.alreadySent && !outreachData?.canSendFollowup ? (
                       <div className="bg-indigo-950/40 border border-indigo-500/40 p-4 rounded-xl flex items-start gap-3">
                         <CheckCircle2 size={20} className="text-indigo-400 mt-0.5 shrink-0" />
                         <div>
                           <h4 className="text-sm font-bold text-indigo-200">
-                            Pełna sekwencja zakończona (Follow-up wysłany)
+                            Pełna sekwencja zakończona (Wysłano {outreachData?.outboundCount || 4}/4 wiadomości)
                           </h4>
                           <p className="text-xs text-indigo-300/80 mt-1">
-                            Wysłano wstępny e-mail z audytem oraz jeden follow-up. Zgodnie z etyką B2B i nienarzucającym
-                            się kontaktem, system blokuje wysyłanie kolejnych wiadomości automatycznych do tej firmy.
+                            Zgodnie z Inwariantem 7 (maks. 3 follow-upy, 4 wiadomości łącznie) oraz etyką B2B, system zablokował dalszą wysyłkę automatyczną do tej firmy.
                           </p>
                         </div>
                       </div>
-                    ) : selectedLead.status === "sent" ? (
+                    ) : outreachData?.alreadySent && outreachData?.canSendFollowup ? (
                       <div className="bg-purple-950/40 border border-purple-500/40 p-4 rounded-xl flex items-start gap-3">
                         <Clock size={20} className="text-purple-400 mt-0.5 shrink-0" />
                         <div className="flex-1">
                           <div className="flex items-center justify-between">
                             <h4 className="text-sm font-bold text-purple-200">
-                              Wysłano e-mail wstępny — Blokada ponownej wysyłki
+                              Sekwencja w toku: Gotowy Follow-up {outreachData.outboundCount || 1} z 3
                             </h4>
                             <span className="text-[11px] bg-purple-900/60 text-purple-300 font-bold px-2 py-0.5 rounded">
-                              Oczekiwanie na odpowiedź
+                              Krok {outreachData.outboundCount || 1} / 3 FU
                             </span>
                           </div>
                           <p className="text-xs text-purple-300/80 mt-1">
-                            Pierwsza wiadomość została już wysłana. System trwale blokuje wysłanie pierwszej wiadomości po raz drugi.
-                            Jeśli odbiorca nie odpisał, możesz poniżej uruchomić i wysłać <strong>spersonalizowany Follow-up AI</strong> w tym samym wątku (<code className="text-purple-200">Re: ...</code>).
+                            Wysłano już {outreachData.outboundCount || 1} wiadomości. Jeśli odbiorca nadal nie odpisał, możesz poniżej przygotować i wysłać <strong>spersonalizowany Follow-up {outreachData.outboundCount || 1} AI</strong> w tym samym wątku (<code className="text-purple-200">Re: ...</code>).
                           </p>
                         </div>
                       </div>
@@ -5269,15 +6726,75 @@ export default function LeadMachineDashboard() {
                       </div>
                     </div>
 
-                    {/* Composer Editor (Active if not followup_sent) */}
-                    {selectedLead.status !== "followup_sent" ? (
+                    {/* 4-Step Sequence Timeline (Invariant 7) */}
+                    <div className="bg-[#141C2E] border border-[#28354D] p-4 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-bold uppercase tracking-wider text-[#94A3B8] flex items-center gap-1.5">
+                          <Calendar size={13} className="text-[#FFE600]" />
+                          Harmonogram Sekwencji (Inwariant 7: Inicjalny + do 3 FU)
+                        </span>
+                        <span className="font-mono text-[11px] text-[#FFE600] font-bold">
+                          Wysłano {Math.min(4, outreachData?.outboundCount || 0)}/4
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                        {[
+                          { step: 0, title: "0. E-mail Inicjalny", desc: "Audyt WWW + Landing", delay: "Dzień 0" },
+                          { step: 1, title: "1. Follow-up 1", desc: "Konsultacja online", delay: "+3 dni ciszy" },
+                          { step: 2, title: "2. Follow-up 2", desc: "Pytanie biznesowe", delay: "+3 dni ciszy" },
+                          { step: 3, title: "3. Break-up (FU3)", desc: "Domknięcie kontaktu", delay: "+4 dni ciszy" },
+                        ].map((item) => {
+                          const count = outreachData?.outboundCount || 0;
+                          const isPast = count > item.step;
+                          const isCurrent = count === item.step && (!outreachData?.alreadySent || outreachData?.canSendFollowup);
+
+                          return (
+                            <div
+                              key={item.step}
+                              className={`p-3 rounded-xl border flex flex-col justify-between transition-all ${
+                                isPast
+                                  ? "bg-purple-950/30 border-purple-800/60 text-purple-200"
+                                  : isCurrent
+                                  ? "bg-[#FFE600]/10 border-[#FFE600] text-white shadow-sm"
+                                  : "bg-[#0E1422] border-[#1E293B] text-[#64748B]"
+                              }`}
+                            >
+                              <div>
+                                <div className="flex items-center justify-between text-[10px] font-bold mb-1">
+                                  <span className={isCurrent ? "text-[#FFE600]" : ""}>{item.delay}</span>
+                                  {isPast ? (
+                                    <span className="text-emerald-400 flex items-center gap-0.5 font-mono">
+                                      <CheckCircle2 size={11} /> Wysłano
+                                    </span>
+                                  ) : isCurrent ? (
+                                    <span className="text-[#FFE600] font-bold flex items-center gap-0.5">
+                                      <Clock size={11} className="animate-spin" /> Teraz
+                                    </span>
+                                  ) : (
+                                    <span className="text-[#64748B]">Oczekuje</span>
+                                  )}
+                                </div>
+                                <div className={`text-xs font-black ${isCurrent ? "text-[#FFE600]" : "text-white"}`}>
+                                  {item.title}
+                                </div>
+                                <div className="text-[10px] text-[#94A3B8] mt-0.5">{item.desc}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Composer Editor (Active if not finished) */}
+                    {(!outreachData?.alreadySent || outreachData?.canSendFollowup) ? (
                       <div className="bg-[#141C2E] border border-[#28354D] p-4 rounded-xl space-y-3">
                         <div className="flex items-center justify-between">
                           <label className="text-xs font-bold text-white flex items-center gap-1.5">
-                            {selectedLead.status === "sent" ? (
+                            {outreachData?.alreadySent ? (
                               <>
                                 <Sparkles size={14} className="text-[#FFE600]" />
-                                Szkic Follow-up AI (Gemini):
+                                Szkic Follow-up {outreachData?.outboundCount || 1} AI (Gemini):
                               </>
                             ) : (
                               <>
@@ -5287,7 +6804,7 @@ export default function LeadMachineDashboard() {
                             )}
                           </label>
 
-                          {selectedLead.status === "sent" && (
+                          {outreachData?.alreadySent && (
                             <button
                               onClick={handleRegenerateFollowupAi}
                               disabled={outreachAiGenerating}
@@ -5326,14 +6843,14 @@ export default function LeadMachineDashboard() {
                         </div>
 
                         <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
-                          {selectedLead.status === "sent" ? (
+                          {outreachData?.alreadySent ? (
                             <button
                               onClick={() => handleSendOutreachFromDrawer(true)}
                               disabled={outreachSending}
                               className="flex-1 bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#4F46E5] hover:to-[#7C3AED] text-white font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-50 transition-all cursor-pointer"
                             >
                               <Sparkles size={16} />
-                              {outreachSending ? "Wysyłanie Follow-up..." : "Wyślij Follow-up AI (wątek Re:...)"}
+                              {outreachSending ? "Wysyłanie Follow-up..." : `Wyślij Follow-up ${outreachData?.outboundCount || 1} AI (wątek Re:...)`}
                             </button>
                           ) : (
                             <button
@@ -5363,7 +6880,7 @@ export default function LeadMachineDashboard() {
                         <CheckCircle2 size={28} className="mx-auto text-indigo-400" />
                         <h4 className="text-sm font-bold text-white">Sekwencja outreach jest ukończona</h4>
                         <p className="text-xs text-[#94A3B8]">
-                          Wszystkie dopuszczalne wiadomości (wstępna + follow-up) zostały wysłane.
+                          Wszystkie dopuszczalne wiadomości (wstępna + 3 follow-upy) zostały wysłane.
                         </p>
                       </div>
                     )}

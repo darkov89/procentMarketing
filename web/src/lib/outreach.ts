@@ -120,7 +120,8 @@ export async function composeFollowupEmail(
     bookingUrl?: string | null;
   },
   originalSubject?: string | null,
-  contactName?: string | null
+  contactName?: string | null,
+  stepNumber: number = 1
 ): Promise<EmailDraft> {
   const salutation = contactName ? `Dzień dobry Panie/Pani ${contactName},` : "Dzień dobry,";
   const offerUrl = offer.deployUrl || offer.bookingUrl || "https://procentmarketing.pl";
@@ -128,22 +129,34 @@ export async function composeFollowupEmail(
   const prevSub = originalSubject || `${lead.companyName} — dedykowana strategia automatyzacji (${city})`;
   const subject = prevSub.startsWith("Re:") ? prevSub : `Re: ${prevSub}`;
 
+  // Stage-specific guidelines
+  let stageGuideline = "";
+  if (stepNumber === 3) {
+    stageGuideline = `To jest Follow-up 3 (Break-up / Finalny kontakt). Jeśli odbiorca nie jest zainteresowany, uprzejmie domknij wątek i zaznacz, że nie będziesz więcej pisać. Pozostaw link do analizy ${offerUrl} na przyszłość.`;
+  } else if (stepNumber === 2) {
+    stageGuideline = `To jest Follow-up 2. Zadaj jedno konkretne pytanie biznesowe dot. skracania czasu reakcji na zapytania w branży ${lead.industry || "B2B"} do poniżej 60 sekund. Zaproponuj 15 minut rozmowy.`;
+  } else {
+    stageGuideline = `To jest Follow-up 1. Uprzejmie nawiąż do analizy ${offerUrl} i zaoferuj bezpłatną 15-minutową konsultację online.`;
+  }
+
   // Try Gemini AI if API key is configured
   const apiKey = process.env.GEMINI_API_KEY;
   if (apiKey) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const prompt = `Jesteś specjalistą ds. rozwoju w agencji Procent Marketing z Legnicy.
-Napisz krótki, uprzejmy e-mail follow-up do firmy "${lead.companyName}" (${lead.industry || "usługi"}, miasto: ${city}).
+Napisz krótki, uprzejmy e-mail follow-up (etap ${stepNumber} z 3) do firmy "${lead.companyName}" (${lead.industry || "usługi"}, miasto: ${city}).
 Wcześniej wysłano analizę pod adresem: ${offerUrl}. Nikt nie odpisał.
 
+CEL ETAPU:
+${stageGuideline}
+
 ZASADY:
-1. Objętość: 45-65 słów (bardzo zwięźle, szanuj czas odbiorcy).
-2. Ton: profesjonalny, bez narzucania się. Zakaz pisania: "Ponawiam kontakt", "Czy miał Pan okazję przeczytać", "Przypominam się".
-3. Zaoferuj 1 konkretną wartość (np. bezpłatną 15-minutową konsultację online, gotowość do omówienia potencjału automatyzacji zapytań z rejonu ${city}).
-4. Umieść link do oferty: ${offerUrl}.
-5. Podpis: Dariusz Rink, Procent Marketing, ul. M. Rataja 15, Legnica.
-6. Stopka: 'Aby zrezygnować, odpowiedz STOP.'
+1. Objętość: 40-60 słów (bardzo zwięźle, szanuj czas odbiorcy).
+2. Ton: profesjonalny, partnerski, bez narzucania się. Zakaz pisania: "Ponawiam kontakt", "Czy miał Pan okazję przeczytać", "Przypominam się".
+3. Umieść link do oferty: ${offerUrl}.
+4. Podpis: Dariusz Rink, Procent Marketing, ul. M. Rataja 15, Legnica.
+5. Stopka: 'Aby zrezygnować, odpowiedz STOP.'
 
 Zwróć wynik jako JSON:
 {
@@ -176,8 +189,83 @@ Zwróć wynik jako JSON:
     }
   }
 
-  // Deterministic fallback template
-  const bodyText = `${salutation}
+  // Deterministic fallback templates depending on stage
+  let bodyText = "";
+  let bodyHtml = "";
+
+  if (stepNumber === 3) {
+    bodyText = `${salutation}
+
+Ponieważ nie otrzymałem odpowiedzi na wcześniejsze wiadomości dotyczące analizy dla ${lead.companyName}, zakładam, że automatyzacja zapytań nie jest obecnie Państwa priorytetem.
+
+Zgodnie z naszymi standardami, zamykam ten wątek i nie będę więcej pisać. Gdyby temat powrócił w kolejnych kwartałach, przygotowany materiał pozostaje aktywny pod adresem:
+👉 ${offerUrl}
+
+Życzę dalszych sukcesów w rozwoju firmy,
+Dariusz Rink
+Procent Marketing (AM PROCENT Sp. z o.o.)
+ul. M. Rataja 15, 59-220 Legnica
+NIP: 6912590158 | www.procentmarketing.pl
+
+---
+Aby zrezygnować z dalszego kontaktu, prosimy o odpowiedź 'STOP'.`;
+
+    bodyHtml = `
+  <div style="font-family: Arial, sans-serif; color: #1E293B; line-height: 1.6; max-width: 600px;">
+    <p>${salutation}</p>
+    <p>Ponieważ nie otrzymałem odpowiedzi na wcześniejsze wiadomości dotyczące analizy dla <strong>${lead.companyName}</strong>, zakładam, że automatyzacja zapytań nie jest obecnie Państwa priorytetem.</p>
+    <p>Zamykam ten wątek i nie będę więcej pisać. Gdyby temat powrócił w kolejnych kwartałach, przygotowany materiał pozostaje aktywny:</p>
+    <div style="margin: 20px 0;">
+      <a href="${offerUrl}" style="background-color: #FFE600; color: #000; padding: 10px 20px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block;">
+        👉 Przejdź do analizy ${lead.companyName}
+      </a>
+    </div>
+    <p>Życzę dalszych sukcesów w rozwoju firmy,<br/>
+    <strong>Dariusz Rink</strong><br/>
+    Procent Marketing (AM PROCENT Sp. z o.o.)<br/>
+    ul. M. Rataja 15, 59-220 Legnica | <a href="https://procentmarketing.pl">procentmarketing.pl</a></p>
+    <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 25px 0 10px 0;" />
+    <p style="font-size: 11px; color: #64748B;">Aby zrezygnować z kontaktu, odpowiedz 'STOP'.</p>
+  </div>`;
+  } else if (stepNumber === 2) {
+    bodyText = `${salutation}
+
+Krótkie pytanie: czy proces obsługi zapytań od klientów w ${lead.companyName} działa w pełni automatycznie, czy wciąż wymaga ręcznego przepisywania danych przez zespół?
+
+W analizie technologicznej zmapowaliśmy mechanizm, który pozwala skrócić czas reakcji do 60 sekund:
+👉 ${offerUrl}
+
+Czy 15 minut na krótką prezentację wideo w tym tygodniu miałoby dla Państwa sens?
+
+Z poważaniem,
+Dariusz Rink
+Procent Marketing (AM PROCENT Sp. z o.o.)
+ul. M. Rataja 15, 59-220 Legnica
+NIP: 6912590158 | www.procentmarketing.pl
+
+---
+Aby zrezygnować z dalszego kontaktu, prosimy o odpowiedź 'STOP'.`;
+
+    bodyHtml = `
+  <div style="font-family: Arial, sans-serif; color: #1E293B; line-height: 1.6; max-width: 600px;">
+    <p>${salutation}</p>
+    <p>Krótkie pytanie: czy proces obsługi zapytań w <strong>${lead.companyName}</strong> działa w pełni automatycznie, czy wciąż wymaga ręcznego przepisywania danych przez zespół?</p>
+    <p>W analizie zmapowaliśmy mechanizm skracający czas reakcji do 60 sekund:</p>
+    <div style="margin: 20px 0;">
+      <a href="${offerUrl}" style="background-color: #FFE600; color: #000; padding: 10px 20px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block;">
+        👉 Zobacz moduł automatyzacji
+      </a>
+    </div>
+    <p>Czy 15 minut na krótką prezentację wideo w tym tygodniu miałoby sens?</p>
+    <p>Z poważaniem,<br/>
+    <strong>Dariusz Rink</strong><br/>
+    Procent Marketing (AM PROCENT Sp. z o.o.)<br/>
+    ul. M. Rataja 15, 59-220 Legnica | <a href="https://procentmarketing.pl">procentmarketing.pl</a></p>
+    <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 25px 0 10px 0;" />
+    <p style="font-size: 11px; color: #64748B;">Aby zrezygnować z kontaktu, odpowiedz 'STOP'.</p>
+  </div>`;
+  } else {
+    bodyText = `${salutation}
 
 Pozwalam sobie nawiązać do przesłanej analizy obecności w sieci dla firmy ${lead.companyName}.
 
@@ -195,18 +283,16 @@ NIP: 6912590158 | www.procentmarketing.pl
 ---
 Aby zrezygnować z dalszego kontaktu, prosimy o odpowiedź 'STOP'.`;
 
-  const bodyHtml = `
+    bodyHtml = `
   <div style="font-family: Arial, sans-serif; color: #1E293B; line-height: 1.6; max-width: 600px;">
     <p>${salutation}</p>
     <p>Pozwalam sobie nawiązać do przesłanej analizy dla firmy <strong>${lead.companyName}</strong>.</p>
     <p>W ramach przygotowanego materiału zmapowaliśmy ścieżkę zapytań w rejonie <strong>${city}</strong> oraz moduły usprawniające pozyskiwanie klientów:</p>
-    
     <div style="margin: 20px 0;">
       <a href="${offerUrl}" style="background-color: #FFE600; color: #000; padding: 10px 20px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block;">
         👉 Otwórz analizę dla ${lead.companyName}
       </a>
     </div>
-
     <p>Chętnie poświęcę 15 minut na krótką, bezpłatną rozmowę, aby omówić z Państwem najważniejsze wnioski.</p>
     <p>Z poważaniem,<br/>
     <strong>Dariusz Rink</strong><br/>
@@ -215,6 +301,7 @@ Aby zrezygnować z dalszego kontaktu, prosimy o odpowiedź 'STOP'.`;
     <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 25px 0 10px 0;" />
     <p style="font-size: 11px; color: #64748B;">Aby zrezygnować z kontaktu, odpowiedz 'STOP'.</p>
   </div>`;
+  }
 
   return {
     recipientEmail: lead.emailPrimary || "kontakt@procentmarketing.pl",
