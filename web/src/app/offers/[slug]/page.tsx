@@ -34,14 +34,31 @@ export default async function OfferPage({
     proposedModules: (offer.proposedModules as any[]) || [],
     pricingRange: offer.pricingRange || "od 2 800 zł / mies.",
     processSteps: (offer.processSteps as any[]) || [],
-    ctaText: "Umów bezpłatną konsultację",
+    ctaText: offer.ctaText || "Umów bezpłatną konsultację",
   };
+
+  const senderInfo = {
+    name: offer.senderName,
+    role: offer.senderRole,
+    company: offer.senderCompany,
+    email: offer.senderEmail,
+    phone: offer.senderPhone,
+    website: offer.senderWebsite,
+    customNote: offer.customNote,
+    bookingUrl: offer.bookingUrl,
+  };
+
+  const bookingUrl =
+    offer.bookingUrl && !offer.bookingUrl.startsWith("/o/")
+      ? offer.bookingUrl
+      : `https://cal.com/procentmarketing/15min?name=${encodeURIComponent(offer.lead.companyName)}`;
 
   const html = renderOfferPage(
     offerContent,
     { companyName: offer.lead.companyName, city: offer.lead.city },
     offer.slug,
-    offer.bookingUrl
+    bookingUrl,
+    senderInfo
   );
 
   return (

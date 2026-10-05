@@ -34,6 +34,15 @@ Każdy z poniższych inwariantów jest zweryfikowany zautomatyzowanym zestawem t
 
 ---
 
+## STUDIO OFERTY & PROFIL NADAWCY (WHITE-LABEL & SAAS READINESS)
+
+- **Edycja treści i wizytówki autora**: Każda oferta w panelu posiada dedykowane Studio Oferty (`drawerTab="offer"`) umożliwiające modyfikację nagłówka, modułów, wyceny, CTA oraz podpisu eksperta (imię, rola, firma, telefon, strona www, notatka osobista).
+- **Zapis i audyt**: Zmiany w ofertach persistowane są przez `PUT /api/offers/[id]` z wymogiem `requireUser()` i zapisem zdarzenia w `lead_events`.
+- **Domyślny profil w `app_settings`**: Globalny profil autora zapisywany jest pod kluczem `sender_profile` i służy jako baza dla nowo generowanych ofert oraz szablonów korespondencji.
+- **Elastyczna wysyłka**: Użytkownik ma pełną swobodę wyboru pomiędzy wysyłką automatyczną przez SMTP, wysyłką w partii (batch), a ręcznym kopiowaniem spersonalizowanego linku `/o/[token]` i treści wiadomości.
+
+---
+
 ## DOKUMENTACJA POWIĄZANA
 
 - `docs/ARCHITECTURE_V2.md` — Pełna specyfikacja architektury technicznej 2.0.

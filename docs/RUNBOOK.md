@@ -95,3 +95,20 @@ Metryki wspierające:
 - **Response Rate**: odsetek odpowiedzi $\ge 8\%$.
 - **Positive Reply Rate**: odsetek zainteresowanych $\ge 3\%$.
 - **Czas pracy właściciela**: $\le 30$ minut na dobę.
+
+---
+
+## 6. Studio Oferty, Profil Nadawcy & Tryb Bez SMTP (White-label & Manual Mode)
+
+System został zaprojektowany z myślą o maksymalnej elastyczności — możesz z niego korzystać bez natychmiastowego podłączania SMTP:
+
+1. **Globalny Profil Nadawcy**:
+   - W zakładce **Ustawienia** skonfiguruj domyślne dane autora (Twoje imię, rola, firma, strona www, telefon, link do kalendarza spotkań i dedykowana notatka).
+   - Pozwala to korzystać z narzędzia zarówno dla Procent Marketing, jak i w modelu agencyjnym / SaaS dla dowolnego podmiotu.
+2. **Edycja Poszczególnych Ofert (Studio Oferty)**:
+   - Po kliknięciu w lead otwórz zakładkę **Studio Oferty & Strona**.
+   - W trybie **Edytor Treści & Podpisu** możesz swobodnie modyfikować nagłówek, wstępną diagnozę, listę modułów (dodawać/usuwać/zmieniać emoji), wycenę oraz wizytówkę autora oferty.
+   - W trybie **Podgląd na żywo** zobaczysz dokładnie to, co zobaczy klient pod unikalnym adresem `/o/[token]`.
+3. **Wysyłka Ręczna (1-Click Copy)**:
+   - Jeżeli nie chcesz jeszcze konfigurować SMTP, kliknij przycisk **"Kopiuj Link"** lub w zakładce **Outreach E-mail** kliknij **"Kopiuj Treść Maila"**.
+   - Wiadomość możesz natychmiast wkleić do swojego programu pocztowego (Gmail, Outlook), wiadomości LinkedIn lub komunikatora.

@@ -1,11 +1,33 @@
 import { OfferContent } from "./gemini";
 
+export interface SenderInfo {
+  name?: string | null;
+  role?: string | null;
+  company?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  customNote?: string | null;
+  bookingUrl?: string | null;
+}
+
 export function renderOfferPage(
   offer: OfferContent,
   lead: { companyName: string; city?: string | null },
   slug: string,
-  bookingUrl: string = "https://cal.com/procentmarketing/15min"
+  bookingUrl: string = "https://cal.com/procentmarketing/15min",
+  sender?: SenderInfo
 ): string {
+  const effectiveBookingUrl = sender?.bookingUrl || bookingUrl || "https://cal.com/procentmarketing/15min";
+  const companyName = sender?.company || "PROCENT MARKETING";
+  const authorName = sender?.name || "Dariusz";
+  const authorRole = sender?.role || "Założyciel & Strateg B2B";
+  const authorEmail = sender?.email || "kontakt@procentmarketing.pl";
+  const authorPhone = sender?.phone || null;
+  const authorWebsite = sender?.website || "https://procentmarketing.pl";
+  const customNote = sender?.customNote || null;
+  const initials = authorName.trim() ? authorName.trim().charAt(0).toUpperCase() : "%";
+
   const observationsHtml = offer.observations
     .map(
       (obs) => `
@@ -280,6 +302,90 @@ export function renderOfferPage(
             background-color: #fff;
         }
 
+        .author-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 60px;
+            backdrop-filter: blur(10px);
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+
+        .author-top {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+        }
+
+        .author-avatar {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent) 0%, #D4AF37 100%);
+            color: #0A0C10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+            font-weight: 900;
+            flex-shrink: 0;
+            box-shadow: 0 0 15px var(--accent-glow);
+        }
+
+        .author-info h4 {
+            font-size: 1.15rem;
+            font-weight: 800;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .author-info p {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .author-note {
+            background: rgba(255, 255, 255, 0.03);
+            border-left: 3px solid var(--accent);
+            padding: 14px 18px;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            color: #D1D5DB;
+            font-style: italic;
+        }
+
+        .author-contacts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .contact-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-card);
+            color: var(--text-primary);
+            text-decoration: none;
+            padding: 8px 14px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+
+        .contact-pill:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(255, 230, 0, 0.05);
+        }
+
         footer {
             border-top: 1px solid var(--border-card);
             padding-top: 40px;
@@ -299,7 +405,7 @@ export function renderOfferPage(
     <div class="container">
         <header>
             <div class="logo">
-                <span class="logo-tag">%</span> PROCENT MARKETING
+                <span class="logo-tag">${initials}</span> ${companyName.toUpperCase()}
             </div>
             <div class="badge-target">Dedykowana dla: <strong>${lead.companyName}</strong></div>
         </header>
@@ -336,13 +442,35 @@ export function renderOfferPage(
             <p style="color: var(--text-secondary); margin-bottom: 30px; max-width: 500px; margin-left: auto; margin-right: auto;">
                 Bez długoterminowych cyrografów. Rozliczamy się za realne wdrożenia i wzrost zapytań.
             </p>
-            <a href="${bookingUrl}" target="_blank" class="cta-btn">${offer.ctaText} →</a>
+            <a href="${effectiveBookingUrl}" target="_blank" class="cta-btn">${offer.ctaText} →</a>
+        </section>
+
+        <section class="author-card">
+            <div class="author-top">
+                <div class="author-avatar">${initials}</div>
+                <div class="author-info">
+                    <div style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--accent); font-weight: 700; margin-bottom: 2px;">
+                        Ofertę przygotował(a):
+                    </div>
+                    <h4>${authorName}</h4>
+                    <p>${authorRole} · <strong style="color: var(--text-primary);">${companyName}</strong></p>
+                </div>
+            </div>
+            ${customNote ? `<div class="author-note">"${customNote}"</div>` : ''}
+            <div class="author-contacts">
+                ${authorEmail ? `<a href="mailto:${authorEmail}" class="contact-pill">📧 ${authorEmail}</a>` : ''}
+                ${authorPhone ? `<a href="tel:${authorPhone}" class="contact-pill">📞 ${authorPhone}</a>` : ''}
+                ${authorWebsite ? `<a href="${authorWebsite.startsWith('http') ? authorWebsite : 'https://' + authorWebsite}" target="_blank" class="contact-pill">🌐 ${authorWebsite.replace(/^https?:\/\//, '')}</a>` : ''}
+                <a href="${effectiveBookingUrl}" target="_blank" class="contact-pill" style="border-color: var(--accent); color: var(--accent); margin-left: auto;">
+                    📅 ${offer.ctaText}
+                </a>
+            </div>
         </section>
 
         <footer>
-            <p><strong>AM PROCENT Sp. z o.o.</strong> | ul. M. Rataja 15, 59-220 Legnica | NIP: 6912590158 | KRS: 0001200066</p>
+            <p><strong>${companyName}</strong> ${authorEmail ? `| ${authorEmail}` : ''} ${authorPhone ? `| ${authorPhone}` : ''}</p>
             <p style="font-size: 0.75rem; margin-top: 10px;">
-                Dokument wygenerowany w oparciu o publiczne dane i audyt technologiczny. Klauzula informacyjna RODO: procentmarketing.pl/rodo
+                Dokument wygenerowany w oparciu o publiczne dane i audyt technologiczny. Klauzula informacyjna RODO: ${authorWebsite ? `${authorWebsite.replace(/\/$/, '')}/rodo` : 'procentmarketing.pl/rodo'}
             </p>
         </footer>
     </div>

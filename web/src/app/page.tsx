@@ -75,16 +75,23 @@ function getEmailPreview(lead: LeadItem) {
   const city = lead.city || "Legnicy";
   const offerUrl =
     lead.offer?.token
-      ? `/o/${lead.offer.token}`
+      ? `${typeof window !== "undefined" ? window.location.origin : ""}/o/${lead.offer.token}`
       : lead.offer?.deployUrl ||
         lead.offer?.bookingUrl ||
         (lead.offer?.slug ? `/offers/${lead.offer.slug}` : "https://procentmarketing.pl");
+
+  const companySender = lead.offer?.senderCompany || "Procent Marketing";
+  const senderName = lead.offer?.senderName || "Dariusz";
+  const senderRole = lead.offer?.senderRole || "Założyciel & Strateg B2B";
+  const senderEmail = lead.offer?.senderEmail || "kontakt@procentmarketing.pl";
+  const senderPhone = lead.offer?.senderPhone || null;
+  const senderWebsite = lead.offer?.senderWebsite || "https://procentmarketing.pl";
 
   const subject = `${lead.companyName} — dedykowana strategia automatyzacji i pozyskiwania klientów (${city})`;
 
   const bodyText = `${salutation}
 
-Zwracam się do Państwa w imieniu agencji Procent Marketing z Legnicy.
+Zwracam się do Państwa w imieniu ${companySender}.
 
 W ramach analizy lokalnego rynku w rejonie ${city} przygotowaliśmy dla firmy ${lead.companyName} dedykowaną stronę ze wstępną analizą obecności w sieci oraz propozycją automatyzacji zapytań:
 
@@ -98,14 +105,14 @@ Prezentacja zawiera:
 Wewnątrz strony znajduje się bezpośredni kalendarz do 15-minutowej, bezpłatnej rozmowy.
 
 Z poważaniem,
-Dariusz Rink
-Zespół Procent Marketing (AM PROCENT Sp. z o.o.)
-ul. M. Rataja 15, 59-220 Legnica
-NIP: 6912590158 | www.procentmarketing.pl
+${senderName}
+${senderRole} | ${companySender}
+${senderEmail}${senderPhone ? ` | tel. ${senderPhone}` : ''}
+${senderWebsite}
 
 ---
 Klauzula informacyjna (Art. 14 RODO):
-Administratorem Państwa danych jest AM PROCENT Sp. z o.o. Dane pozyskano z publicznie dostępnych rejestrów (CEIDG/KRS) lub strony WWW. Aby zrezygnować, odpowiedz 'STOP'.`;
+Administratorem Państwa danych jest ${companySender}. Dane pozyskano z publicznie dostępnych rejestrów (CEIDG/KRS) lub strony WWW. Aby zrezygnować, odpowiedz 'STOP'.`;
 
   return { subject, bodyText, offerUrl };
 }
@@ -220,6 +227,62 @@ export default function LeadMachineDashboard() {
   const [targetingLoading, setTargetingLoading] = useState(false);
   const [newIndustryTag, setNewIndustryTag] = useState("");
   const [newExcludedKeyword, setNewExcludedKeyword] = useState("");
+
+  // Sender Profile & Signature Settings state
+  const [senderProfile, setSenderProfile] = useState<{
+    senderName: string;
+    senderRole: string;
+    senderEmail: string;
+    senderPhone: string;
+    senderCompany: string;
+    senderWebsite: string;
+    bookingUrl: string;
+    customNote: string;
+  }>({
+    senderName: "Dariusz",
+    senderRole: "Założyciel & Strateg B2B",
+    senderEmail: "kontakt@procentmarketing.pl",
+    senderPhone: "+48 700 000 000",
+    senderCompany: "Procent Marketing",
+    senderWebsite: "https://procentmarketing.pl",
+    bookingUrl: "https://cal.com/procentmarketing/15min",
+    customNote: "W razie pytań technicznych dotyczących wstępnej analizy, zapraszam do bezpośredniego kontaktu.",
+  });
+  const [senderProfileLoading, setSenderProfileLoading] = useState(false);
+
+  // Offer Studio Editor state (for selectedLead)
+  const [offerEditorMode, setOfferEditorMode] = useState<"edit" | "preview">("edit");
+  const [offerForm, setOfferForm] = useState<{
+    title: string;
+    heroObservation: string;
+    pricingRange: string;
+    ctaText: string;
+    bookingUrl: string;
+    proposedModules: Array<{ name: string; description: string; iconEmoji: string }>;
+    senderName: string;
+    senderRole: string;
+    senderEmail: string;
+    senderPhone: string;
+    senderCompany: string;
+    senderWebsite: string;
+    customNote: string;
+  }>({
+    title: "",
+    heroObservation: "",
+    pricingRange: "od 2 800 zł / mies.",
+    ctaText: "Umów bezpłatną konsultację",
+    bookingUrl: "",
+    proposedModules: [],
+    senderName: "",
+    senderRole: "",
+    senderEmail: "",
+    senderPhone: "",
+    senderCompany: "",
+    senderWebsite: "",
+    customNote: "",
+  });
+  const [offerSaving, setOfferSaving] = useState(false);
+  const [offerCopied, setOfferCopied] = useState(false);
 
   // Outreach & Follow-up Drawer State
   const [outreachData, setOutreachData] = useState<{
@@ -391,6 +454,28 @@ export default function LeadMachineDashboard() {
       fetchOutreachData(selectedLead.id);
     }
   }, [selectedLead?.id, drawerTab]);
+
+  // Keep offerForm synchronized when selectedLead or its offer changes
+  useEffect(() => {
+    if (selectedLead?.offer) {
+      const o = selectedLead.offer;
+      setOfferForm({
+        title: o.title || "",
+        heroObservation: o.heroObservation || "",
+        pricingRange: o.pricingRange || "od 2 800 zł / mies.",
+        ctaText: o.ctaText || "Umów bezpłatną konsultację",
+        bookingUrl: o.bookingUrl && !o.bookingUrl.startsWith("/o/") ? o.bookingUrl : "",
+        proposedModules: Array.isArray(o.proposedModules) ? o.proposedModules : [],
+        senderName: o.senderName || senderProfile.senderName || "Dariusz",
+        senderRole: o.senderRole || senderProfile.senderRole || "Założyciel & Strateg B2B",
+        senderEmail: o.senderEmail || senderProfile.senderEmail || "kontakt@procentmarketing.pl",
+        senderPhone: o.senderPhone || senderProfile.senderPhone || "+48 700 000 000",
+        senderCompany: o.senderCompany || senderProfile.senderCompany || "Procent Marketing",
+        senderWebsite: o.senderWebsite || senderProfile.senderWebsite || "https://procentmarketing.pl",
+        customNote: o.customNote !== undefined ? o.customNote : (senderProfile.customNote || ""),
+      });
+    }
+  }, [selectedLead?.id, selectedLead?.offer, senderProfile]);
 
   // Filtered Leads
   const filteredLeads = useMemo(() => {
@@ -930,6 +1015,68 @@ export default function LeadMachineDashboard() {
         }
       }
     } catch {}
+
+    try {
+      const resSender = await fetch("/api/settings/sender-profile");
+      const dataSender = await resSender.json();
+      if (dataSender.success && dataSender.profile) {
+        setSenderProfile(dataSender.profile);
+      }
+    } catch {}
+  };
+
+  // Handle Save Sender Profile Settings
+  const handleSaveSenderProfile = async () => {
+    setSenderProfileLoading(true);
+    showToast("Zapisywanie profilu i podpisu nadawcy...", "info");
+    try {
+      const res = await fetch("/api/settings/sender-profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(senderProfile),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast("Domyślny profil nadawcy został pomyślnie zapisany!");
+        if (data.profile) setSenderProfile(data.profile);
+      } else {
+        showToast(data.error || "Błąd zapisu profilu", "error");
+      }
+    } catch {
+      showToast("Błąd zapisu profilu nadawcy", "error");
+    } finally {
+      setSenderProfileLoading(false);
+    }
+  };
+
+  // Handle Save Custom Offer Edits
+  const handleSaveOfferEdits = async (leadId: number) => {
+    setOfferSaving(true);
+    showToast("Zapisywanie zmian w ofercie i podpisie...", "info");
+    try {
+      const res = await fetch(`/api/offers/${leadId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(offerForm),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast("Oferta i podpis zostały pomyślnie zaktualizowane!");
+        await fetchLeads();
+        if (selectedLead && data.offer) {
+          setSelectedLead({
+            ...selectedLead,
+            offer: data.offer,
+          });
+        }
+      } else {
+        showToast(data.error || "Błąd zapisu oferty", "error");
+      }
+    } catch (e: any) {
+      showToast("Błąd zapisu oferty: " + (e?.message || String(e)), "error");
+    } finally {
+      setOfferSaving(false);
+    }
   };
 
   // Handle Save Targeting Settings
@@ -2858,6 +3005,140 @@ export default function LeadMachineDashboard() {
               </div>
             </div>
 
+            {/* DEFAULT SENDER PROFILE & SIGNATURE CARD */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-6">
+              <div className="flex flex-wrap items-center justify-between border-b border-[#28354D] pb-4 gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-[#FFE600] text-black rounded-xl font-bold">
+                    <User size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-extrabold text-white">
+                      Domyślny Profil Nadawcy & Podpis w Ofertach
+                    </h3>
+                    <p className="text-xs text-[#94A3B8]">
+                      Wizytówka autora, która wyświetla się na dedykowanej stronie klienta (/o/[token]) oraz w podpisach e-maili. Każdą ofertę możesz też dostosować indywidualnie.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSaveSenderProfile}
+                  disabled={senderProfileLoading}
+                  className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-xs px-5 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50 cursor-pointer"
+                >
+                  <Save size={16} />
+                  {senderProfileLoading ? "Zapisywanie..." : "Zapisz Profil Nadawcy"}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                    Imię i Nazwisko Nadawcy
+                  </label>
+                  <input
+                    type="text"
+                    value={senderProfile.senderName}
+                    onChange={(e) => setSenderProfile({ ...senderProfile, senderName: e.target.value })}
+                    placeholder="np. Dariusz"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                    Stanowisko / Rola
+                  </label>
+                  <input
+                    type="text"
+                    value={senderProfile.senderRole}
+                    onChange={(e) => setSenderProfile({ ...senderProfile, senderRole: e.target.value })}
+                    placeholder="np. Założyciel & Strateg B2B"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                    Nazwa Twojej Firmy / Brandu
+                  </label>
+                  <input
+                    type="text"
+                    value={senderProfile.senderCompany}
+                    onChange={(e) => setSenderProfile({ ...senderProfile, senderCompany: e.target.value })}
+                    placeholder="np. Procent Marketing"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                    Oficjalny Adres E-mail do Kontaktu
+                  </label>
+                  <input
+                    type="email"
+                    value={senderProfile.senderEmail}
+                    onChange={(e) => setSenderProfile({ ...senderProfile, senderEmail: e.target.value })}
+                    placeholder="kontakt@twojadomena.pl"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                    Numer Telefonu (widoczny na ofercie)
+                  </label>
+                  <input
+                    type="text"
+                    value={senderProfile.senderPhone}
+                    onChange={(e) => setSenderProfile({ ...senderProfile, senderPhone: e.target.value })}
+                    placeholder="np. +48 700 000 000"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                    Strona Internetowa Firmy
+                  </label>
+                  <input
+                    type="text"
+                    value={senderProfile.senderWebsite}
+                    onChange={(e) => setSenderProfile({ ...senderProfile, senderWebsite: e.target.value })}
+                    placeholder="np. https://procentmarketing.pl"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                    Link do Kalendarza Rezerwacji (Cal.com / Calendly / Własny)
+                  </label>
+                  <input
+                    type="text"
+                    value={senderProfile.bookingUrl}
+                    onChange={(e) => setSenderProfile({ ...senderProfile, bookingUrl: e.target.value })}
+                    placeholder="np. https://cal.com/procentmarketing/15min"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                    Domyślna Osobista Notatka / Dedykacja na Ofercie
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={senderProfile.customNote}
+                    onChange={(e) => setSenderProfile({ ...senderProfile, customNote: e.target.value })}
+                    placeholder="np. W razie pytań technicznych dotyczących wstępnej analizy, zapraszam do bezpośredniego kontaktu."
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* SMTP Configuration Form */}
             <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-4">
               <div className="flex items-center justify-between border-b border-[#28354D] pb-3">
@@ -3370,7 +3651,7 @@ export default function LeadMachineDashboard() {
                 onClick={() => setDrawerTab("offer")}
                 className={`px-3 py-1.5 rounded ${drawerTab === "offer" ? "bg-[#FFE600] text-black" : "text-[#94A3B8]"}`}
               >
-                Oferta Netlify
+                Studio Oferty & Strona
               </button>
               <button
                 onClick={() => setDrawerTab("email")}
@@ -3509,41 +3790,406 @@ export default function LeadMachineDashboard() {
             {drawerTab === "offer" && (
               <div className="space-y-4">
                 {selectedLead.offer ? (
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="badge badge-offer">OFERTA OPUBLIKOWANA</span>
-                      <a
-                        href={selectedLead.offer.token ? `/o/${selectedLead.offer.token}` : `/offers/${selectedLead.offer.slug}`}
-                        target="_blank"
-                        className="text-xs bg-[#FFE600] text-black font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1.5"
-                      >
-                        <ExternalLink size={13} /> Otwórz Stronę
-                      </a>
-                    </div>
-                    <h3 className="text-base font-bold text-[#FFE600]">{selectedLead.offer.title}</h3>
-                    <p className="text-xs text-[#CBD5E1] bg-[#141C2E] p-3 rounded-lg border border-[#28354D]">
-                      {selectedLead.offer.heroObservation}
-                    </p>
-
-                    {/* Live Preview Iframe */}
-                    <div className="border border-[#28354D] rounded-xl overflow-hidden">
-                      <div className="bg-[#0A0E17] px-3 py-1.5 text-xs text-[#94A3B8] font-bold">
-                        Podgląd Strony Klienta:
+                  <div className="space-y-4">
+                    {/* Top Control Bar */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 bg-[#141C2E] p-3 rounded-xl border border-[#28354D]">
+                      <div className="flex items-center gap-2">
+                        <span className="badge badge-offer">OFERTA OPUBLIKOWANA</span>
+                        <span className="text-[11px] text-[#94A3B8] font-mono">
+                          /o/{selectedLead.offer.token ? `${selectedLead.offer.token.slice(0, 10)}...` : selectedLead.offer.slug}
+                        </span>
                       </div>
-                      <iframe
-                        src={selectedLead.offer.token ? `/o/${selectedLead.offer.token}` : `/offers/${selectedLead.offer.slug}`}
-                        className="w-full h-[400px] bg-[#0A0C10]"
-                      />
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${window.location.origin}/o/${selectedLead.offer.token || selectedLead.offer.slug}`;
+                            navigator.clipboard.writeText(url);
+                            setOfferCopied(true);
+                            showToast("Skopiowano bezpośredni link do oferty!");
+                            setTimeout(() => setOfferCopied(false), 2500);
+                          }}
+                          className="text-xs bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Copy size={13} /> {offerCopied ? "Skopiowano!" : "Kopiuj Link"}
+                        </button>
+                        <a
+                          href={selectedLead.offer.token ? `/o/${selectedLead.offer.token}` : `/offers/${selectedLead.offer.slug}`}
+                          target="_blank"
+                          className="text-xs bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all"
+                        >
+                          <ExternalLink size={13} /> Otwórz Stronę
+                        </a>
+                      </div>
                     </div>
+
+                    {/* Mode Switcher Tabs */}
+                    <div className="flex border-b border-[#28354D] gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setOfferEditorMode("edit")}
+                        className={`pb-2.5 px-3 text-xs font-extrabold flex items-center gap-1.5 border-b-2 transition-all cursor-pointer ${
+                          offerEditorMode === "edit"
+                            ? "border-[#FFE600] text-[#FFE600]"
+                            : "border-transparent text-[#94A3B8] hover:text-white"
+                        }`}
+                      >
+                        <Edit2 size={14} /> Edytor Treści & Podpisu
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOfferEditorMode("preview")}
+                        className={`pb-2.5 px-3 text-xs font-extrabold flex items-center gap-1.5 border-b-2 transition-all cursor-pointer ${
+                          offerEditorMode === "preview"
+                            ? "border-[#FFE600] text-[#FFE600]"
+                            : "border-transparent text-[#94A3B8] hover:text-white"
+                        }`}
+                      >
+                        <Eye size={14} /> Podgląd na żywo (/o/[token])
+                      </button>
+                    </div>
+
+                    {/* MODE 1: EDIT FORM */}
+                    {offerEditorMode === "edit" && (
+                      <div className="space-y-4">
+                        {/* 1. Header & Hero Observation */}
+                        <div className="bg-[#141C2E] p-4 rounded-xl border border-[#28354D] space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600]">
+                            1. Nagłówek & Główna Obserwacja Audytu
+                          </h4>
+                          <div>
+                            <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                              Tytuł / Główna propozycja
+                            </label>
+                            <input
+                              type="text"
+                              value={offerForm.title}
+                              onChange={(e) => setOfferForm({ ...offerForm, title: e.target.value })}
+                              className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                              Wstępna obserwacja audytu (hero observation)
+                            </label>
+                            <textarea
+                              rows={3}
+                              value={offerForm.heroObservation}
+                              onChange={(e) => setOfferForm({ ...offerForm, heroObservation: e.target.value })}
+                              className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg p-2.5 text-xs text-white focus:outline-none focus:border-[#FFE600] leading-relaxed"
+                            />
+                          </div>
+                        </div>
+
+                        {/* 2. Proposed Modules */}
+                        <div className="bg-[#141C2E] p-4 rounded-xl border border-[#28354D] space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600]">
+                              2. Proponowane Moduły Wdrożenia ({offerForm.proposedModules?.length || 0})
+                            </h4>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const newMod = {
+                                  name: "Nowy moduł automatyzacji",
+                                  description: "Opis wdrożenia dedykowanego rozwiązania dla klienta.",
+                                  iconEmoji: "⚡",
+                                };
+                                setOfferForm({
+                                  ...offerForm,
+                                  proposedModules: [...(offerForm.proposedModules || []), newMod],
+                                });
+                              }}
+                              className="text-[11px] bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold px-2.5 py-1 rounded flex items-center gap-1 cursor-pointer"
+                            >
+                              <Plus size={12} /> Dodaj Moduł
+                            </button>
+                          </div>
+
+                          <div className="space-y-2.5">
+                            {offerForm.proposedModules?.map((mod, idx) => (
+                              <div
+                                key={idx}
+                                className="bg-[#0A0E17] p-3 rounded-lg border border-[#28354D] space-y-2"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    value={mod.iconEmoji || "⚡"}
+                                    onChange={(e) => {
+                                      const updated = [...offerForm.proposedModules];
+                                      updated[idx].iconEmoji = e.target.value;
+                                      setOfferForm({ ...offerForm, proposedModules: updated });
+                                    }}
+                                    className="w-10 text-center bg-[#141C2E] border border-[#28354D] rounded py-1 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                                    title="Ikona Emoji"
+                                  />
+                                  <input
+                                    type="text"
+                                    value={mod.name}
+                                    onChange={(e) => {
+                                      const updated = [...offerForm.proposedModules];
+                                      updated[idx].name = e.target.value;
+                                      setOfferForm({ ...offerForm, proposedModules: updated });
+                                    }}
+                                    placeholder="Nazwa modułu..."
+                                    className="flex-1 bg-[#141C2E] border border-[#28354D] rounded px-2.5 py-1 text-xs text-white font-bold focus:outline-none focus:border-[#FFE600]"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = offerForm.proposedModules.filter((_, i) => i !== idx);
+                                      setOfferForm({ ...offerForm, proposedModules: updated });
+                                    }}
+                                    className="text-[#94A3B8] hover:text-[#FB7185] p-1 transition-colors cursor-pointer"
+                                    title="Usuń moduł"
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </div>
+                                <textarea
+                                  rows={2}
+                                  value={mod.description}
+                                  onChange={(e) => {
+                                    const updated = [...offerForm.proposedModules];
+                                    updated[idx].description = e.target.value;
+                                    setOfferForm({ ...offerForm, proposedModules: updated });
+                                  }}
+                                  placeholder="Opis wdrożenia..."
+                                  className="w-full bg-[#141C2E] border border-[#28354D] rounded p-2 text-xs text-[#CBD5E1] focus:outline-none focus:border-[#FFE600]"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 3. Pricing, CTA & Calendar */}
+                        <div className="bg-[#141C2E] p-4 rounded-xl border border-[#28354D] space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600]">
+                            3. Wycena, CTA & Kalendarz
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                Szacowana Inwestycja
+                              </label>
+                              <input
+                                type="text"
+                                value={offerForm.pricingRange}
+                                onChange={(e) => setOfferForm({ ...offerForm, pricingRange: e.target.value })}
+                                placeholder="np. od 2 800 zł / mies."
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                Tekst Przycisku CTA
+                              </label>
+                              <input
+                                type="text"
+                                value={offerForm.ctaText}
+                                onChange={(e) => setOfferForm({ ...offerForm, ctaText: e.target.value })}
+                                placeholder="np. Umów bezpłatną konsultację"
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                Własny Link do Kalendarza
+                              </label>
+                              <input
+                                type="text"
+                                value={offerForm.bookingUrl}
+                                onChange={(e) => setOfferForm({ ...offerForm, bookingUrl: e.target.value })}
+                                placeholder="Domyślnie z Ustawień"
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 4. Sender Profile & Signature */}
+                        <div className="bg-[#141C2E] p-4 rounded-xl border border-[#28354D] space-y-3">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600]">
+                              4. Wizytówka Autora & Podpis (Karta na stronie /o/[token])
+                            </h4>
+                            <span className="text-[10px] text-[#94A3B8]">Dedykowane dla tej propozycji</span>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                Imię i Nazwisko
+                              </label>
+                              <input
+                                type="text"
+                                value={offerForm.senderName}
+                                onChange={(e) => setOfferForm({ ...offerForm, senderName: e.target.value })}
+                                placeholder="np. Dariusz"
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                Rola / Stanowisko
+                              </label>
+                              <input
+                                type="text"
+                                value={offerForm.senderRole}
+                                onChange={(e) => setOfferForm({ ...offerForm, senderRole: e.target.value })}
+                                placeholder="np. Założyciel & Strateg B2B"
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                Firma / Brand Nadawcy
+                              </label>
+                              <input
+                                type="text"
+                                value={offerForm.senderCompany}
+                                onChange={(e) => setOfferForm({ ...offerForm, senderCompany: e.target.value })}
+                                placeholder="np. Procent Marketing"
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                E-mail Autora
+                              </label>
+                              <input
+                                type="email"
+                                value={offerForm.senderEmail}
+                                onChange={(e) => setOfferForm({ ...offerForm, senderEmail: e.target.value })}
+                                placeholder="kontakt@twojadomena.pl"
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                Telefon do Kontaktu
+                              </label>
+                              <input
+                                type="text"
+                                value={offerForm.senderPhone}
+                                onChange={(e) => setOfferForm({ ...offerForm, senderPhone: e.target.value })}
+                                placeholder="+48 700 000 000"
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                Strona WWW Firmy
+                              </label>
+                              <input
+                                type="text"
+                                value={offerForm.senderWebsite}
+                                onChange={(e) => setOfferForm({ ...offerForm, senderWebsite: e.target.value })}
+                                placeholder="https://procentmarketing.pl"
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                            <div className="md:col-span-2">
+                              <label className="block text-[11px] font-bold text-[#94A3B8] mb-1">
+                                Osobista Notatka / Dedykacja w Podpisie
+                              </label>
+                              <textarea
+                                rows={2}
+                                value={offerForm.customNote}
+                                onChange={(e) => setOfferForm({ ...offerForm, customNote: e.target.value })}
+                                placeholder="np. W razie pytań technicznych dotyczących wstępnej analizy, zapraszam do bezpośredniego kontaktu."
+                                className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg p-2 text-xs text-white focus:outline-none focus:border-[#FFE600]"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Save Action Bar */}
+                        <div className="flex flex-wrap items-center gap-3 pt-2">
+                          <button
+                            type="button"
+                            onClick={() => handleSaveOfferEdits(selectedLead.id)}
+                            disabled={offerSaving}
+                            className="flex-1 bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/10 disabled:opacity-50 transition-all cursor-pointer"
+                          >
+                            <Save size={15} />
+                            {offerSaving ? "Zapisywanie..." : "Zapisz Zmiany w Ofercie & Podpisie"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setOfferEditorMode("preview")}
+                            className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Eye size={15} /> Zobacz Podgląd
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDrawerTab("email")}
+                            className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-[#38BDF8] font-bold text-xs py-3 px-4 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Mail size={15} /> Do E-maila
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* MODE 2: LIVE PREVIEW */}
+                    {offerEditorMode === "preview" && (
+                      <div className="space-y-3">
+                        <div className="border border-[#28354D] rounded-xl overflow-hidden shadow-2xl">
+                          <div className="bg-[#0A0E17] px-3.5 py-2 text-xs text-[#94A3B8] font-bold flex items-center justify-between border-b border-[#28354D]">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-[#34D399] animate-pulse" />
+                              <span>Podgląd na żywo strony klienta (/o/[token]):</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const url = `${window.location.origin}/o/${selectedLead.offer.token || selectedLead.offer.slug}`;
+                                navigator.clipboard.writeText(url);
+                                setOfferCopied(true);
+                                showToast("Skopiowano link do schowka!");
+                                setTimeout(() => setOfferCopied(false), 2500);
+                              }}
+                              className="text-[11px] text-[#FFE600] hover:underline flex items-center gap-1 cursor-pointer"
+                            >
+                              <Copy size={12} /> {offerCopied ? "Skopiowano!" : "Kopiuj Link"}
+                            </button>
+                          </div>
+                          <iframe
+                            src={selectedLead.offer.token ? `/o/${selectedLead.offer.token}` : `/offers/${selectedLead.offer.slug}`}
+                            className="w-full h-[620px] bg-[#0A0C10]"
+                          />
+                        </div>
+                        <div className="text-center">
+                          <button
+                            type="button"
+                            onClick={() => setOfferEditorMode("edit")}
+                            className="text-xs text-[#94A3B8] hover:text-[#FFE600] inline-flex items-center gap-1 font-bold cursor-pointer"
+                          >
+                            <Edit2 size={13} /> Wróć do edycji treści i podpisu oferty
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
-                  <div className="text-center py-8">
-                    <p className="text-sm text-[#94A3B8] mb-3">Ta firma nie posiada jeszcze wygenerowanej oferty.</p>
+                  <div className="text-center py-10 bg-[#141C2E] p-6 rounded-2xl border border-[#28354D] space-y-4">
+                    <div className="w-12 h-12 bg-[#FFE600]/10 text-[#FFE600] rounded-xl flex items-center justify-center mx-auto text-xl">
+                      ⚡
+                    </div>
+                    <div>
+                      <h4 className="text-base font-extrabold text-white">Brak wygenerowanej oferty</h4>
+                      <p className="text-xs text-[#94A3B8] max-w-md mx-auto mt-1">
+                        Wygeneruj spersonalizowaną ofertę z analizą obecności w sieci na bazie audytu technologicznego i profilu nadawcy.
+                      </p>
+                    </div>
                     <button
+                      type="button"
                       onClick={() => handleGenerateOffer(selectedLead.id)}
-                      className="bg-[#FFE600] text-black font-extrabold text-xs px-5 py-2.5 rounded-lg shadow-lg"
+                      className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-xs px-6 py-3 rounded-xl shadow-lg shadow-yellow-500/10 inline-flex items-center gap-2 cursor-pointer transition-all"
                     >
-                      ⚡ Generuj Ofertę (Gemini AI)
+                      <Zap size={15} /> Generuj Ofertę (Gemini AI)
                     </button>
                   </div>
                 )}
@@ -3697,12 +4343,12 @@ export default function LeadMachineDashboard() {
                           />
                         </div>
 
-                        <div className="pt-2">
+                        <div className="pt-2 flex flex-col sm:flex-row gap-2.5">
                           {selectedLead.status === "sent" ? (
                             <button
                               onClick={() => handleSendOutreachFromDrawer(true)}
                               disabled={outreachSending}
-                              className="w-full bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#4F46E5] hover:to-[#7C3AED] text-white font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-50 transition-all cursor-pointer"
+                              className="flex-1 bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#4F46E5] hover:to-[#7C3AED] text-white font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20 disabled:opacity-50 transition-all cursor-pointer"
                             >
                               <Sparkles size={16} />
                               {outreachSending ? "Wysyłanie Follow-up..." : "Wyślij Follow-up AI (wątek Re:...)"}
@@ -3711,12 +4357,23 @@ export default function LeadMachineDashboard() {
                             <button
                               onClick={() => handleSendOutreachFromDrawer(false)}
                               disabled={outreachSending}
-                              className="w-full bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/10 disabled:opacity-50 transition-all cursor-pointer"
+                              className="flex-1 bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm py-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/10 disabled:opacity-50 transition-all cursor-pointer"
                             >
                               <Send size={16} />
-                              {outreachSending ? "Wysyłanie e-maila..." : "Wyślij Pierwszy E-mail z Ofertą"}
+                              {outreachSending ? "Wysyłanie e-maila..." : "Wyślij E-mail przez SMTP"}
                             </button>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const fullText = `Temat: ${outreachSubject}\n\n${outreachBody}`;
+                              navigator.clipboard.writeText(fullText);
+                              showToast("Skopiowano temat i treść e-maila do schowka! Możesz wysłać z własnej skrzynki.", "success");
+                            }}
+                            className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-xs py-3 px-4 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Copy size={15} /> Kopiuj Treść Maila
+                          </button>
                         </div>
                       </div>
                     ) : (
