@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { getResolvedMailConfig } from "@/lib/mail-service";
 import { requireUser } from "@/lib/auth";
+import { db, appSettings } from "@/lib/db";
+import { eq } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
 
@@ -8,34 +10,63 @@ export async function GET() {
   try {
     await requireUser();
     const cfg = getResolvedMailConfig();
+
+    // Check DB integrations for persisted keys
+    let dbIntegrations: Record<string, string> = {};
+    try {
+      const record = await db.query.appSettings.findFirst({
+        where: eq(appSettings.key, "system_integrations"),
+      });
+      if (record?.value && typeof record.value === "object") {
+        dbIntegrations = record.value as Record<string, string>;
+        // Hydrate in-memory process.env if present in DB
+        if (dbIntegrations.googleApiKey && !process.env.GOOGLE_MAPS_API_KEY) {
+          process.env.GOOGLE_MAPS_API_KEY = dbIntegrations.googleApiKey;
+        }
+        if (dbIntegrations.geminiApiKey && !process.env.GEMINI_API_KEY) {
+          process.env.GEMINI_API_KEY = dbIntegrations.geminiApiKey;
+        }
+        if (dbIntegrations.netlifyToken && !process.env.NETLIFY_AUTH_TOKEN) {
+          process.env.NETLIFY_AUTH_TOKEN = dbIntegrations.netlifyToken;
+        }
+      }
+    } catch {}
+
+    const googleKey = process.env.GOOGLE_MAPS_API_KEY || dbIntegrations.googleApiKey || "";
+    const geminiKey = process.env.GEMINI_API_KEY || dbIntegrations.geminiApiKey || "";
+    const netlifyTok = process.env.NETLIFY_AUTH_TOKEN || dbIntegrations.netlifyToken || "";
+
     return NextResponse.json({
       success: true,
       config: {
-        smtpHost: cfg.smtpHost || "",
-        smtpPort: cfg.smtpPort || 587,
-        smtpUser: cfg.smtpUser || "",
-        smtpPass: cfg.smtpPass ? "••••••••" : "",
-        hasSmtpPass: !!cfg.smtpPass,
+        smtpHost: cfg.smtpHost || dbIntegrations.smtpHost || "",
+        smtpPort: cfg.smtpPort || (dbIntegrations.smtpPort ? parseInt(dbIntegrations.smtpPort, 10) : 587),
+        smtpUser: cfg.smtpUser || dbIntegrations.smtpUser || "",
+        smtpPass: cfg.smtpPass || dbIntegrations.smtpPass ? "••••••••" : "",
+        hasSmtpPass: !!(cfg.smtpPass || dbIntegrations.smtpPass),
         smtpSecure: cfg.smtpSecure,
-        smtpFromEmail: cfg.smtpFromEmail || "kontakt@procentmarketing.pl",
-        smtpFromName: cfg.smtpFromName || "Procent Marketing",
+        smtpFromEmail: cfg.smtpFromEmail || dbIntegrations.smtpFromEmail || "kontakt@procentmarketing.pl",
+        smtpFromName: cfg.smtpFromName || dbIntegrations.smtpFromName || "Procent Marketing",
 
-        imapHost: cfg.imapHost || "",
-        imapPort: cfg.imapPort || 993,
-        imapUser: cfg.imapUser || "",
-        imapPass: cfg.imapPass ? "••••••••" : "",
-        hasImapPass: !!cfg.imapPass,
+        imapHost: cfg.imapHost || dbIntegrations.imapHost || "",
+        imapPort: cfg.imapPort || (dbIntegrations.imapPort ? parseInt(dbIntegrations.imapPort, 10) : 993),
+        imapUser: cfg.imapUser || dbIntegrations.imapUser || "",
+        imapPass: cfg.imapPass || dbIntegrations.imapPass ? "••••••••" : "",
+        hasImapPass: !!(cfg.imapPass || dbIntegrations.imapPass),
         imapTls: cfg.imapTls,
 
-        googleApiKey: process.env.GOOGLE_MAPS_API_KEY ? "••••••••" : "",
-        hasGoogleApiKey: !!process.env.GOOGLE_MAPS_API_KEY,
-        geminiApiKey: process.env.GEMINI_API_KEY ? "••••••••" : "",
-        hasGeminiApiKey: !!process.env.GEMINI_API_KEY,
-        netlifyToken: process.env.NETLIFY_AUTH_TOKEN ? "••••••••" : "",
-        hasNetlifyToken: !!process.env.NETLIFY_AUTH_TOKEN,
+        googleApiKey: googleKey ? "••••••••" : "",
+        hasGoogleApiKey: !!googleKey,
+        geminiApiKey: geminiKey ? "••••••••" : "",
+        hasGeminiApiKey: !!geminiKey,
+        netlifyToken: netlifyTok ? "••••••••" : "",
+        hasNetlifyToken: !!netlifyTok,
       },
     });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: err?.message || String(err) }, { status: 500 });
   }
 }
@@ -45,30 +76,105 @@ export async function POST(req: Request) {
     await requireUser();
     const body = await req.json();
 
-    // Update in-memory process.env
-    if (body.smtpHost !== undefined) process.env.SMTP_HOST = body.smtpHost;
-    if (body.smtpPort !== undefined) process.env.SMTP_PORT = String(body.smtpPort);
-    if (body.smtpUser !== undefined) process.env.SMTP_USER = body.smtpUser;
-    if (body.smtpPass && body.smtpPass !== "••••••••") process.env.SMTP_PASSWORD = body.smtpPass;
-    if (body.smtpFromEmail !== undefined) process.env.SMTP_FROM_EMAIL = body.smtpFromEmail;
-    if (body.smtpFromName !== undefined) process.env.SMTP_FROM_NAME = body.smtpFromName;
+    // Fetch existing DB integrations
+    let existingIntegrations: Record<string, string> = {};
+    try {
+      const existing = await db.query.appSettings.findFirst({
+        where: eq(appSettings.key, "system_integrations"),
+      });
+      if (existing?.value && typeof existing.value === "object") {
+        existingIntegrations = existing.value as Record<string, string>;
+      }
+    } catch {}
 
-    if (body.imapHost !== undefined) process.env.IMAP_HOST = body.imapHost;
-    if (body.imapPort !== undefined) process.env.IMAP_PORT = String(body.imapPort);
-    if (body.imapUser !== undefined) process.env.IMAP_USER = body.imapUser;
-    if (body.imapPass && body.imapPass !== "••••••••") process.env.IMAP_PASSWORD = body.imapPass;
+    const updatedIntegrations = { ...existingIntegrations };
+
+    // Update in-memory process.env and DB payload
+    if (body.smtpHost !== undefined) {
+      process.env.SMTP_HOST = body.smtpHost;
+      updatedIntegrations.smtpHost = body.smtpHost;
+    }
+    if (body.smtpPort !== undefined) {
+      process.env.SMTP_PORT = String(body.smtpPort);
+      updatedIntegrations.smtpPort = String(body.smtpPort);
+    }
+    if (body.smtpUser !== undefined) {
+      process.env.SMTP_USER = body.smtpUser;
+      updatedIntegrations.smtpUser = body.smtpUser;
+    }
+    if (body.smtpPass && body.smtpPass !== "••••••••") {
+      process.env.SMTP_PASSWORD = body.smtpPass;
+      updatedIntegrations.smtpPass = body.smtpPass;
+    }
+    if (body.smtpFromEmail !== undefined) {
+      process.env.SMTP_FROM_EMAIL = body.smtpFromEmail;
+      updatedIntegrations.smtpFromEmail = body.smtpFromEmail;
+    }
+    if (body.smtpFromName !== undefined) {
+      process.env.SMTP_FROM_NAME = body.smtpFromName;
+      updatedIntegrations.smtpFromName = body.smtpFromName;
+    }
+
+    if (body.imapHost !== undefined) {
+      process.env.IMAP_HOST = body.imapHost;
+      updatedIntegrations.imapHost = body.imapHost;
+    }
+    if (body.imapPort !== undefined) {
+      process.env.IMAP_PORT = String(body.imapPort);
+      updatedIntegrations.imapPort = String(body.imapPort);
+    }
+    if (body.imapUser !== undefined) {
+      process.env.IMAP_USER = body.imapUser;
+      updatedIntegrations.imapUser = body.imapUser;
+    }
+    if (body.imapPass && body.imapPass !== "••••••••") {
+      process.env.IMAP_PASSWORD = body.imapPass;
+      updatedIntegrations.imapPass = body.imapPass;
+    }
 
     if (body.googleApiKey && body.googleApiKey !== "••••••••") {
-      process.env.GOOGLE_MAPS_API_KEY = body.googleApiKey;
+      const cleanGKey = body.googleApiKey.trim();
+      process.env.GOOGLE_MAPS_API_KEY = cleanGKey;
+      process.env.GOOGLE_PLACES_KEY = cleanGKey;
+      updatedIntegrations.googleApiKey = cleanGKey;
     }
     if (body.geminiApiKey && body.geminiApiKey !== "••••••••") {
-      process.env.GEMINI_API_KEY = body.geminiApiKey;
+      const cleanGemini = body.geminiApiKey.trim();
+      process.env.GEMINI_API_KEY = cleanGemini;
+      updatedIntegrations.geminiApiKey = cleanGemini;
     }
     if (body.netlifyToken && body.netlifyToken !== "••••••••") {
-      process.env.NETLIFY_AUTH_TOKEN = body.netlifyToken;
+      const cleanNetlify = body.netlifyToken.trim();
+      process.env.NETLIFY_AUTH_TOKEN = cleanNetlify;
+      updatedIntegrations.netlifyToken = cleanNetlify;
     }
 
-    // Persist to web/.env.local if writable
+    // Persist permanently to PostgreSQL app_settings table
+    try {
+      const existing = await db.query.appSettings.findFirst({
+        where: eq(appSettings.key, "system_integrations"),
+      });
+
+      if (existing) {
+        await db
+          .update(appSettings)
+          .set({
+            value: updatedIntegrations,
+            updatedAt: new Date(),
+          })
+          .where(eq(appSettings.key, "system_integrations"));
+      } else {
+        await db.insert(appSettings).values({
+          key: "system_integrations",
+          value: updatedIntegrations,
+          updatedAt: new Date(),
+        });
+      }
+    } catch (dbErr) {
+      console.warn("Could not save to appSettings table:", dbErr);
+    }
+
+    // Persist to local .env.local file if possible
     try {
       const envPath = path.resolve(process.cwd(), ".env.local");
       let currentContent = "";
@@ -116,14 +222,17 @@ export async function POST(req: Request) {
 
       fs.writeFileSync(envPath, newLines.join("\n").trim() + "\n", "utf-8");
     } catch (saveErr) {
-      console.warn("Could not save to .env.local file directly (possibly read-only env):", saveErr);
+      console.warn("Could not save to .env.local file directly:", saveErr);
     }
 
     return NextResponse.json({
       success: true,
-      message: "Konfiguracja serwerów poczty została zaktualizowana i zapisana!",
+      message: "Konfiguracja integracji oraz serwerów poczty została pomyślnie zapisana.",
     });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     return NextResponse.json({ success: false, error: err?.message || String(err) }, { status: 500 });
   }
 }

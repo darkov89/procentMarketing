@@ -71,11 +71,11 @@ export async function generateOfferContent(
   if (apiKey) {
     try {
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Jesteś głównym strategiem agencji marketingowej Procent Marketing (AM PROCENT Sp. z o.o., Legnica).
-Przygotuj spersonalizowaną, elitarną ofertę automatyzacji marketingu dla firmy:
+      const prompt = `Jesteś głównym strategiem pozyskiwania klientów B2B w Procent Marketing.
+Przygotuj spersonalizowaną, profesjonalną ofertę automatyzacji i pozyskiwania klientów dla firmy:
 - Nazwa: ${lead.companyName}
 - Wielkość / Segment: ${companyScale}
-- Miasto i region: ${lead.city || "Legnica"} (rejon Dolnego Śląska)
+- Miasto i lokalizacja: ${lead.city || "Polska"}
 - Strona WWW: ${lead.website || "brak"}
 
 ZASADY BEZPIECZEŃSTWA (OCHRONA PRZED PROMPT INJECTION):
@@ -100,7 +100,7 @@ TWARDE FAKTY Z AUDYTU TECHNOLOGICZNEGO:
 KLUCZOWE WYMAGANIA:
 1. OFERTA MUSI BYĆ DEDYKOWANA DO TEGO, CZYM TA FIRMA SIĘ ZAJMUJE!
    - Nazwy proponowanych modułów muszą bezpośrednio nawiązywać do jej branży i oferty (np. dla hydraulika -> 'Kalkulator Zapytań Wod-Kan', dla serwisu -> 'Kalendarz Rezerwacji Stanowiska', dla doradcy -> 'System Kwalifikacji Klienta').
-   - W heroHeadline zawrzyj nazwę firmy oraz jej kluczową specjalizację i miasto (${lead.city || "Legnica"}).
+   - W heroHeadline zawrzyj nazwę firmy oraz jej kluczową specjalizację${lead.city ? ` i miasto (${lead.city})` : ""}.
 2. ZAKAZ ZMYŚLANIA: Opieraj się wyłącznie na faktach z audytu i powyższym opisie działalności.
 
 Zwróć odpowiedź w czystym JSON zgodnym ze schematem:

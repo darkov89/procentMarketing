@@ -37,15 +37,15 @@ export function composeEmail(
 ): EmailDraft {
   const salutation = contactName ? `Dzień dobry Panie/Pani ${contactName},` : "Dzień dobry,";
   const offerUrl = offer.deployUrl || offer.bookingUrl || "https://procentmarketing.pl";
-  const city = lead.city || "Legnicy";
+  const citySuffix = lead.city ? ` (${lead.city})` : "";
 
-  const subject = `${lead.companyName} — dedykowana strategia automatyzacji i pozyskiwania klientów (${city})`;
+  const subject = `${lead.companyName} — dedykowana strategia automatyzacji i pozyskiwania klientów${citySuffix}`;
 
   const bodyText = `${salutation}
 
-Zwracam się do Państwa w imieniu agencji Procent Marketing z Legnicy.
+Zwracam się do Państwa w imieniu firmy Procent Marketing.
 
-W ramach analizy lokalnego rynku w rejonie ${city} przygotowaliśmy dla firmy ${lead.companyName} dedykowaną, interaktywną stronę ze wstępną analizą obecności w sieci oraz propozycją automatyzacji zapytań:
+W ramach analizy rynku${lead.city ? ` w rejonie ${lead.city}` : ""} przygotowaliśmy dla firmy ${lead.companyName} dedykowaną, interaktywną stronę ze wstępną analizą obecności w sieci oraz propozycją automatyzacji zapytań:
 
 👉 Państwa dedykowana strona: ${offerUrl}
 
@@ -70,8 +70,8 @@ Aby zrezygnować z dalszego kontaktu, prosimy o odpowiedź na tę wiadomość o 
   const bodyHtml = `
   <div style="font-family: Arial, sans-serif; color: #1E293B; line-height: 1.6; max-width: 600px;">
     <p>${salutation}</p>
-    <p>Zwracam się do Państwa w imieniu agencji <strong>Procent Marketing</strong> z Legnicy.</p>
-    <p>W ramach analizy lokalnego rynku w rejonie <strong>${city}</strong> przygotowaliśmy dla Państwa firmy dedykowaną, interaktywną stronę z analizą i propozycją automatyzacji:</p>
+    <p>Zwracam się do Państwa w imieniu firmy <strong>Procent Marketing</strong>.</p>
+    <p>W ramach analizy rynku${lead.city ? ` w rejonie <strong>${lead.city}</strong>` : ""} przygotowaliśmy dla Państwa firmy dedykowaną, interaktywną stronę z analizą i propozycją automatyzacji:</p>
     
     <div style="margin: 25px 0;">
       <a href="${offerUrl}" style="background-color: #FFE600; color: #000; padding: 12px 24px; text-decoration: none; font-weight: bold; border-radius: 6px; display: inline-block;">

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 
 export interface TargetingPreferences {
+  targetVoivodeship: string; // "Dolnośląskie", "Mazowieckie", ..., "Cała Polska"
   targetRegion: string;
   defaultCity: string;
   defaultRadiusKm: number; // 0 means no radius limit (All Poland)
@@ -14,6 +15,7 @@ export interface TargetingPreferences {
 }
 
 const DEFAULT_PREFERENCES: TargetingPreferences = {
+  targetVoivodeship: "Dolnośląskie",
   targetRegion: "Dolnośląskie",
   defaultCity: "Wrocław",
   defaultRadiusKm: 35,
@@ -30,7 +32,7 @@ const DEFAULT_PREFERENCES: TargetingPreferences = {
   ],
   targetCompanyScales: ["mikro", "male", "msp"],
   excludedKeywords: [],
-  notes: "Własne kryteria targetowania i segmentacji rynku B2B",
+  notes: "Krajowe kryteria targetowania i segmentacji rynku B2B",
 };
 
 export async function GET() {
@@ -41,11 +43,13 @@ export async function GET() {
     });
 
     if (record && record.value) {
+      const val = record.value as any;
       return NextResponse.json({
         success: true,
         preferences: {
           ...DEFAULT_PREFERENCES,
-          ...(record.value as any),
+          ...val,
+          targetVoivodeship: val.targetVoivodeship || val.targetRegion || DEFAULT_PREFERENCES.targetVoivodeship,
         },
       });
     }
@@ -71,7 +75,8 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const preferences: TargetingPreferences = {
-      targetRegion: body.targetRegion || DEFAULT_PREFERENCES.targetRegion,
+      targetVoivodeship: body.targetVoivodeship || body.targetRegion || DEFAULT_PREFERENCES.targetVoivodeship,
+      targetRegion: body.targetRegion || body.targetVoivodeship || DEFAULT_PREFERENCES.targetRegion,
       defaultCity: body.defaultCity || DEFAULT_PREFERENCES.defaultCity,
       defaultRadiusKm:
         body.defaultRadiusKm !== undefined
@@ -111,10 +116,13 @@ export async function POST(req: Request) {
 
     return NextResponse.json({
       success: true,
-      message: "Preferencje targetowania i filtrów zostały zapisane pomyślnie!",
+      message: "Preferencje targetowania, województwa i filtrów zostały zapisane pomyślnie!",
       preferences,
     });
   } catch (err: any) {
+    if (err?.name === "AuthenticationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
     return NextResponse.json(
       { success: false, error: err?.message || String(err) },
       { status: 500 }

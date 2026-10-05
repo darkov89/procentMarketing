@@ -48,6 +48,7 @@ import {
   Calendar,
   Award,
 } from "lucide-react";
+import { POLISH_VOIVODESHIPS } from "@/lib/geo";
 
 interface LeadItem {
   id: number;
@@ -77,7 +78,8 @@ interface LeadItem {
 function getEmailPreview(lead: LeadItem) {
   const contactName = lead.contacts?.[0]?.firstName || null;
   const salutation = contactName ? `Dzień dobry Panie/Pani ${contactName},` : "Dzień dobry,";
-  const city = lead.city || "Legnicy";
+  const citySuffix = lead.city ? ` (${lead.city})` : "";
+  const cityPhrase = lead.city ? ` w rejonie ${lead.city}` : "";
   const offerUrl =
     lead.offer?.token
       ? `${typeof window !== "undefined" ? window.location.origin : ""}/o/${lead.offer.token}`
@@ -92,13 +94,13 @@ function getEmailPreview(lead: LeadItem) {
   const senderPhone = lead.offer?.senderPhone || null;
   const senderWebsite = lead.offer?.senderWebsite || "https://procentmarketing.pl";
 
-  const subject = `${lead.companyName} — dedykowana strategia automatyzacji i pozyskiwania klientów (${city})`;
+  const subject = `${lead.companyName} — dedykowana strategia automatyzacji i pozyskiwania klientów${citySuffix}`;
 
   const bodyText = `${salutation}
 
 Zwracam się do Państwa w imieniu ${companySender}.
 
-W ramach analizy lokalnego rynku w rejonie ${city} przygotowaliśmy dla firmy ${lead.companyName} dedykowaną stronę ze wstępną analizą obecności w sieci oraz propozycją automatyzacji zapytań:
+W ramach analizy rynku${cityPhrase} przygotowaliśmy dla firmy ${lead.companyName} dedykowaną stronę ze wstępną analizą obecności w sieci oraz propozycją automatyzacji zapytań:
 
 👉 Dedykowana strona dla Państwa firmy: ${offerUrl}
 
@@ -191,8 +193,11 @@ export default function LeadMachineDashboard() {
   // Scraper Generator state
   const [scraperCompanyScale, setScraperCompanyScale] = useState<"mikro" | "male" | "msp">("mikro");
   const [scraperKeyword, setScraperKeyword] = useState("");
-  const [scraperCity, setScraperCity] = useState("Legnica");
-  const [scraperRadius, setScraperRadius] = useState(30);
+  const [scraperVoivodeship, setScraperVoivodeship] = useState("Dolnośląskie");
+  const [scraperCity, setScraperCity] = useState("Wrocław");
+  const [scraperCustomCity, setScraperCustomCity] = useState("");
+  const [isCustomCityInput, setIsCustomCityInput] = useState(false);
+  const [scraperRadius, setScraperRadius] = useState(35);
   const [scraperLoading, setScraperLoading] = useState(false);
   const [scraperResult, setScraperResult] = useState<any>(null);
 
@@ -226,10 +231,18 @@ export default function LeadMachineDashboard() {
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [smtpTesting, setSmtpTesting] = useState(false);
   const [imapTesting, setImapTesting] = useState(false);
+  const [googleTesting, setGoogleTesting] = useState(false);
+  const [googleDiagnostic, setGoogleDiagnostic] = useState<{
+    tested: boolean;
+    success: boolean;
+    message: string;
+    hint?: string;
+  } | null>(null);
   const [csvUploading, setCsvUploading] = useState(false);
 
   // Targeting Preferences state
   const [targetingSettings, setTargetingSettings] = useState<{
+    targetVoivodeship: string;
     targetRegion: string;
     defaultCity: string;
     defaultRadiusKm: number;
@@ -238,6 +251,7 @@ export default function LeadMachineDashboard() {
     excludedKeywords: string[];
     notes?: string;
   }>({
+    targetVoivodeship: "Dolnośląskie",
     targetRegion: "Dolnośląskie",
     defaultCity: "Wrocław",
     defaultRadiusKm: 35,
@@ -256,9 +270,26 @@ export default function LeadMachineDashboard() {
     excludedKeywords: [],
     notes: "",
   });
+  const [isTargetCustomCity, setIsTargetCustomCity] = useState(false);
+  const [targetingCustomCity, setTargetingCustomCity] = useState("");
   const [targetingLoading, setTargetingLoading] = useState(false);
   const [newIndustryTag, setNewIndustryTag] = useState("");
   const [newExcludedKeyword, setNewExcludedKeyword] = useState("");
+
+  const currentVoivodeshipCities = useMemo(() => {
+    const found = POLISH_VOIVODESHIPS.find(
+      (v) => v.name.toLowerCase() === (scraperVoivodeship || "").toLowerCase()
+    );
+    return found ? found.majorCities : (POLISH_VOIVODESHIPS[0]?.majorCities || []);
+  }, [scraperVoivodeship]);
+
+  const currentTargetingCities = useMemo(() => {
+    const vName = targetingSettings.targetVoivodeship || targetingSettings.targetRegion || "";
+    const found = POLISH_VOIVODESHIPS.find(
+      (v) => v.name.toLowerCase() === vName.toLowerCase()
+    );
+    return found ? found.majorCities : (POLISH_VOIVODESHIPS[0]?.majorCities || []);
+  }, [targetingSettings.targetVoivodeship, targetingSettings.targetRegion]);
 
   // Sender Profile & Signature Settings state
   const [senderProfile, setSenderProfile] = useState<{
@@ -439,23 +470,25 @@ export default function LeadMachineDashboard() {
   // Create Invitation handler
   const handleCreateInvitation = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!inviteEmail || !inviteEmail.includes("@")) {
+      showToast("Wprowadź prawidłowy adres e-mail współpracownika", "error");
+      return;
+    }
     setInviteGenerating(true);
-    showToast("Generowanie zaproszenia...", "info");
+    showToast("Generowanie bezpiecznego zaproszenia...", "info");
     try {
       const res = await fetch("/api/auth/invitations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: inviteEmail || undefined,
+          email: inviteEmail.trim().toLowerCase(),
           role: inviteRole,
-          maxUses: inviteMaxUses,
-          expiresInDays: inviteExpiresInDays,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setGeneratedInviteUrl(data.inviteUrl);
-        showToast("Wygenerowano nowe zaproszenie!", "success");
+        showToast("Wygenerowano imienne zaproszenie dla współpracownika!", "success");
         setInviteEmail("");
         fetchTeamData();
       } else {
@@ -475,13 +508,52 @@ export default function LeadMachineDashboard() {
       const res = await fetch(`/api/auth/invitations/${id}`, { method: "DELETE" });
       const data = await res.json();
       if (data.success) {
-        showToast("Zaproszenie unieważnione");
+        showToast("Zaproszenie zostało unieważnione", "success");
         fetchTeamData();
       } else {
         showToast(data.error || "Błąd usuwania", "error");
       }
     } catch {
       showToast("Błąd serwera", "error");
+    }
+  };
+
+  // Update User Role handler
+  const handleUpdateUserRole = async (userId: number, newRole: "admin" | "member") => {
+    try {
+      showToast("Aktualizacja uprawnień...", "info");
+      const res = await fetch(`/api/auth/users/${userId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message || "Rola użytkownika została zaktualizowana", "success");
+        fetchTeamData();
+      } else {
+        showToast(data.error || "Błąd aktualizacji roli", "error");
+      }
+    } catch {
+      showToast("Błąd połączenia z serwerem", "error");
+    }
+  };
+
+  // Delete User handler
+  const handleDeleteUser = async (userId: number, userName: string) => {
+    if (!confirm(`Czy na pewno chcesz odebrać dostęp do systemu dla użytkownika: ${userName}?`)) return;
+    try {
+      showToast("Cofanie dostępu dla użytkownika...", "info");
+      const res = await fetch(`/api/auth/users/${userId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.success) {
+        showToast(data.message || "Użytkownik został usunięty z organizacji", "success");
+        fetchTeamData();
+      } else {
+        showToast(data.error || "Błąd usuwania użytkownika", "error");
+      }
+    } catch {
+      showToast("Błąd połączenia z serwerem", "error");
     }
   };
 
@@ -742,6 +814,20 @@ export default function LeadMachineDashboard() {
     }
   };
 
+  // Live Drawer State Synchronizer - re-fetches lead details so buttons immediately update drawer UI
+  const refreshSelectedLead = async (leadId: number) => {
+    try {
+      const res = await fetch(`/api/leads/${leadId}`);
+      const data = await res.json();
+      if (data.success && data.lead) {
+        setSelectedLead(data.lead);
+      }
+    } catch (e) {
+      console.error("Błąd odświeżania wybranego leada:", e);
+    }
+    fetchLeads();
+  };
+
   // Quick Action: Run Audit
   const handleRunAudit = async (leadId: number) => {
     showToast("Uruchamianie audytu technologicznego...", "info");
@@ -750,7 +836,7 @@ export default function LeadMachineDashboard() {
       const data = await res.json();
       if (data.success) {
         showToast("Audyt zakończony pomyślnie!");
-        fetchLeads();
+        await refreshSelectedLead(leadId);
       } else {
         showToast(data.error || "Błąd audytu", "error");
       }
@@ -766,7 +852,7 @@ export default function LeadMachineDashboard() {
       const data = await res.json();
       if (data.success) {
         showToast(`Zakwalifikowano: ${data.lead.status.toUpperCase()} (${data.lead.score} pkt)`);
-        fetchLeads();
+        await refreshSelectedLead(leadId);
       } else {
         showToast(data.error || "Błąd kwalifikacji", "error");
       }
@@ -787,7 +873,7 @@ export default function LeadMachineDashboard() {
       const data = await res.json();
       if (data.success) {
         showToast("Oferta opublikowana pomyślnie!");
-        fetchLeads();
+        await refreshSelectedLead(leadId);
       } else {
         showToast(data.error || "Błąd oferty", "error");
       }
@@ -812,10 +898,8 @@ export default function LeadMachineDashboard() {
             ? `Wysłano Follow-up do: ${data.result.recipient}`
             : `Wysłano e-mail do: ${data.result.recipient}`
         );
-        fetchLeads();
-        if (selectedLead?.id === leadId) {
-          fetchOutreachData(leadId);
-        }
+        await refreshSelectedLead(leadId);
+        fetchOutreachData(leadId);
       } else {
         showToast(data.result?.errorMessage || data.error || "Błąd wysyłki", "error");
       }
@@ -847,7 +931,7 @@ export default function LeadMachineDashboard() {
             ? `Wysłano Follow-up AI do: ${data.result.recipient}`
             : `Wysłano e-mail do: ${data.result.recipient}`
         );
-        await fetchLeads();
+        await refreshSelectedLead(selectedLead.id);
         await fetchOutreachData(selectedLead.id);
       } else {
         showToast(data.result?.errorMessage || data.error || "Błąd wysyłki", "error");
@@ -916,15 +1000,17 @@ export default function LeadMachineDashboard() {
   const handleRunScraper = async () => {
     setScraperLoading(true);
     setScraperResult(null);
+    const effectiveCity = isCustomCityInput && scraperCustomCity.trim() ? scraperCustomCity.trim() : scraperCity;
     const scaleLabel = scraperCompanyScale === "mikro" ? "Mikroprzedsiębiorstwa (CEIDG)" : scraperCompanyScale === "male" ? "Małe Przedsiębiorstwa (KRS)" : "MŚP";
-    showToast(`Wyszukiwanie firm (${scaleLabel}) w rejonie ${scraperCity}...`, "info");
+    showToast(`Wyszukiwanie firm (${scaleLabel}) w rejonie ${effectiveCity}, woj. ${scraperVoivodeship}...`, "info");
     try {
       const res = await fetch("/api/scraper", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           keyword: scraperKeyword,
-          city: scraperCity,
+          voivodeship: scraperVoivodeship,
+          city: effectiveCity,
           radiusKm: scraperRadius,
           companyScale: scraperCompanyScale,
         }),
@@ -933,7 +1019,7 @@ export default function LeadMachineDashboard() {
       if (data.success) {
         setScraperResult(data);
         if (data.added > 0) {
-          showToast(`Dodano ${data.added} nowych firm (${scaleLabel})! Zbadano: ${data.scanned}`);
+          showToast(`Dodano ${data.added} nowych firm (${scaleLabel})! Zbadano: ${data.scanned} (zweryfikowano w rejestrach: ${data.registryVerifiedCount || 0})`);
         } else {
           showToast(`Zbadano ${data.scanned} firm (${data.rejectedDuplicates} to duplikaty w CRM).`, "info");
         }
@@ -951,15 +1037,17 @@ export default function LeadMachineDashboard() {
   // Run Scale Cycle with Human-in-the-Loop (Scrape -> Audit/Scrape Email -> Grounded AI Offer -> Review Queue)
   const handleRunAutonomousScaleCycle = async () => {
     setScraperLoading(true);
+    const effectiveCity = isCustomCityInput && scraperCustomCity.trim() ? scraperCustomCity.trim() : scraperCity;
     const scaleLabel = scraperCompanyScale === "mikro" ? "Mikroprzedsiębiorstwa (CEIDG)" : scraperCompanyScale === "male" ? "Małe Przedsiębiorstwa (KRS)" : "MŚP";
-    showToast(`[Krok 1/2] Wyszukiwanie firm (${scaleLabel}) i weryfikacja Google Places / CEIDG...`, "info");
+    showToast(`[Krok 1/2] Wyszukiwanie firm (${scaleLabel}) w rejonie ${effectiveCity} i weryfikacja Google Places / CEIDG / KRS...`, "info");
     try {
       const resScraper = await fetch("/api/scraper", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           keyword: scraperKeyword,
-          city: scraperCity,
+          voivodeship: scraperVoivodeship,
+          city: effectiveCity,
           radiusKm: scraperRadius,
           companyScale: scraperCompanyScale,
         }),
@@ -997,68 +1085,76 @@ export default function LeadMachineDashboard() {
     }
   };
 
-  // Presets definition
+  // Presets definition (Multi-Voivodeship Nationwide Coverage)
   const PRESETS = [
     {
       icon: "🦷",
       title: "Stomatologia & Medycyna",
       keyword: "Stomatologia",
-      city: "Legnica",
+      voivodeship: "Dolnośląskie",
+      city: "Wrocław",
       radius: 30,
-      desc: "Gabinety i kliniki stomatologiczne (Legnica, Lubin, Jawor)",
-    },
-    {
-      icon: "📊",
-      title: "Biura Rachunkowe",
-      keyword: "Księgowość",
-      city: "Lubin",
-      radius: 30,
-      desc: "Kancelarie podatkowe i rachunkowe (Legnica, Lubin, Jawor)",
+      desc: "Kliniki stomatologiczne i gabinety medyczne (Wrocław, Legnica, Lubin)",
     },
     {
       icon: "⚖️",
-      title: "Kancelarie Prawne",
-      keyword: "Prawo",
-      city: "Legnica",
+      title: "Kancelarie Prawne & Podatki",
+      keyword: "Kancelaria Prawna",
+      voivodeship: "Mazowieckie",
+      city: "Warszawa",
       radius: 30,
-      desc: "Adwokaci i radcowie prawni w Zagłębiu Miedziowym",
+      desc: "Adwokaci, radcowie prawni i doradztwo podatkowe w Warszawie",
+    },
+    {
+      icon: "🏭",
+      title: "Automatyka B2B & Przemysł",
+      keyword: "Automatyka Przemysłowa",
+      voivodeship: "Śląskie",
+      city: "Katowice",
+      radius: 35,
+      desc: "Serwis maszyn, automatyka i integracje robotów na Śląsku",
     },
     {
       icon: "☀️",
       title: "Fotowoltaika & HVAC",
       keyword: "Fotowoltaika",
-      city: "Chojnów",
-      radius: 30,
-      desc: "Instalatorzy OZE, pomp ciepła i klimatyzacji",
+      voivodeship: "Wielkopolskie",
+      city: "Poznań",
+      radius: 35,
+      desc: "Instalatorzy OZE, pomp ciepła i klimatyzacji w Wielkopolsce",
     },
     {
-      icon: "🏭",
-      title: "Automatyka B2B & Przemysł",
-      keyword: "Automatyka B2B",
-      city: "Polkowice",
-      radius: 35,
-      desc: "Serwis maszyn przemysłowych i integracja robotów",
+      icon: "📊",
+      title: "Biura Rachunkowe & Audyt",
+      keyword: "Biuro Rachunkowe",
+      voivodeship: "Małopolskie",
+      city: "Kraków",
+      radius: 30,
+      desc: "Kancelarie podatkowe i biura księgowe w Małopolsce",
+    },
+    {
+      icon: "🚚",
+      title: "Spedycja & Logistyka B2B",
+      keyword: "Spedycja Transport",
+      voivodeship: "Pomorskie",
+      city: "Gdańsk",
+      radius: 40,
+      desc: "Firmy transportowe, spedycyjne i logistyczne Trójmiasta",
     },
     {
       icon: "🏗️",
-      title: "Budownictwo & Remonty",
-      keyword: "Budownictwo",
-      city: "Złotoryja",
-      radius: 30,
-      desc: "Generalni wykonawcy i firmy budowlano-remontowe",
-    },
-    {
-      icon: "🏢",
-      title: "Wrocław & Aglomeracja: Kancelarie & B2B",
-      keyword: "Kancelaria B2B",
-      city: "Wrocław",
+      title: "Generalni Wykonawcy Budowlani",
+      keyword: "Generalny Wykonawca",
+      voivodeship: "Dolnośląskie",
+      city: "Legnica",
       radius: 35,
-      desc: "Kancelarie prawne, podatkowe i doradztwo biznesowe (Wrocław)",
+      desc: "Firmy budowlano-remontowe i generalni wykonawcy (Zagłębie Miedziowe)",
     },
     {
       icon: "💻",
-      title: "Wrocław: IT & Nowe Technologie",
-      keyword: "Software IT",
+      title: "Software House & Usługi IT",
+      keyword: "Software House",
+      voivodeship: "Dolnośląskie",
       city: "Wrocław",
       radius: 25,
       desc: "Software house'y, agencje digital i integracje B2B we Wrocławiu",
@@ -1080,6 +1176,9 @@ export default function LeadMachineDashboard() {
       const dataTargeting = await resTargeting.json();
       if (dataTargeting.success && dataTargeting.preferences) {
         setTargetingSettings(dataTargeting.preferences);
+        if (dataTargeting.preferences.targetVoivodeship) {
+          setScraperVoivodeship(dataTargeting.preferences.targetVoivodeship);
+        }
         if (dataTargeting.preferences.defaultCity) {
           setScraperCity(dataTargeting.preferences.defaultCity);
         }
@@ -1256,10 +1355,96 @@ export default function LeadMachineDashboard() {
     }
   };
 
-  // Handle Save Settings
-  const handleSaveSettings = async () => {
+  // Handle Master Save: All Settings (Targeting, Sender Profile, Integrations & Mail)
+  const handleSaveAllSettings = async () => {
     setSettingsLoading(true);
-    showToast("Zapisywanie konfiguracji...", "info");
+    showToast("Zapisywanie wszystkich ustawień (Zasięg, Profil, Klucze i Poczta)...", "info");
+    try {
+      const [resTargeting, resSender, resMail] = await Promise.all([
+        fetch("/api/settings/targeting", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(targetingSettings),
+        }),
+        fetch("/api/settings/sender-profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(senderProfile),
+        }),
+        fetch("/api/settings/mail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(mailSettings),
+        }),
+      ]);
+
+      const [dTargeting, dSender, dMail] = await Promise.all([
+        resTargeting.json(),
+        resSender.json(),
+        resMail.json(),
+      ]);
+
+      if (dTargeting.success && dSender.success && dMail.success) {
+        showToast("Wszystkie ustawienia zostały pomyślnie zapisane!", "success");
+        setScraperVoivodeship(targetingSettings.targetVoivodeship || "Dolnośląskie");
+        setScraperCity(targetingSettings.defaultCity || "Wrocław");
+        setScraperRadius(targetingSettings.defaultRadiusKm);
+        await fetchSettings();
+      } else {
+        const err = dTargeting.error || dSender.error || dMail.error || "Błąd zapisu części ustawień";
+        showToast(err, "error");
+      }
+    } catch {
+      showToast("Błąd połączenia z serwerem", "error");
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  // Handle Test Google API Key
+  const handleTestGoogleApi = async () => {
+    setGoogleTesting(true);
+    setGoogleDiagnostic(null);
+    showToast("Weryfikacja klucza Google Places / Maps API...", "info");
+    try {
+      const res = await fetch("/api/settings/test-google-api", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: mailSettings.googleApiKey }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGoogleDiagnostic({
+          tested: true,
+          success: true,
+          message: data.message || "Połączenie z Google Places API nawiązane pomyślnie!",
+        });
+        showToast("Google API: Klucz aktywny i zweryfikowany!", "success");
+      } else {
+        setGoogleDiagnostic({
+          tested: true,
+          success: false,
+          message: data.diagnostic?.message || data.error || "Błąd weryfikacji klucza",
+          hint: data.diagnostic?.actionableHint,
+        });
+        showToast(data.diagnostic?.message || data.error || "Błąd Google API", "error");
+      }
+    } catch {
+      setGoogleDiagnostic({
+        tested: true,
+        success: false,
+        message: "Błąd połączenia z serwerem testowym",
+      });
+      showToast("Błąd połączenia z Google API", "error");
+    } finally {
+      setGoogleTesting(false);
+    }
+  };
+
+  // Handle Save Mail Settings
+  const handleSaveMailSettings = async () => {
+    setSettingsLoading(true);
+    showToast("Zapisywanie konfiguracji poczty i kluczy API...", "info");
     try {
       const res = await fetch("/api/settings/mail", {
         method: "POST",
@@ -1283,19 +1468,21 @@ export default function LeadMachineDashboard() {
   // Handle Apply Preset
   const handleApplyPreset = async (preset: (typeof PRESETS)[0]) => {
     setScraperKeyword(preset.keyword);
-    setScraperCity(preset.city);
-    setScraperRadius(preset.radius);
+    if ((preset as any).city) setScraperCity((preset as any).city);
+    if ((preset as any).voivodeship) setScraperVoivodeship((preset as any).voivodeship);
+    if ((preset as any).radius) setScraperRadius((preset as any).radius);
     setScraperLoading(true);
     setScraperResult(null);
-    showToast(`Uruchamianie presetu '${preset.title}' (${preset.city} + ${preset.radius}km)...`, "info");
+    showToast(`Uruchamianie presetu '${preset.title}'...`, "info");
     try {
       const res = await fetch("/api/scraper", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           keyword: preset.keyword,
-          city: preset.city,
-          radiusKm: preset.radius,
+          voivodeship: (preset as any).voivodeship || scraperVoivodeship,
+          city: (preset as any).city || scraperCity,
+          radiusKm: (preset as any).radius || scraperRadius,
           companyScale: scraperCompanyScale,
         }),
       });
@@ -1303,13 +1490,13 @@ export default function LeadMachineDashboard() {
       if (data.success) {
         setScraperResult(data);
         if (data.added > 0) {
-          showToast(`Preset '${preset.title}': Dodano ${data.added} nowych firm! (Zbadano: ${data.scanned})`);
+          showToast(`Dodano ${data.added} nowych firm! Zbadano: ${data.scanned} (zweryfikowano w rejestrach: ${data.registryVerifiedCount || 0})`);
         } else {
-          showToast(`Preset: Wszystkie firmy (${data.scanned}) znajdują się już w bazie CRM.`, "info");
+          showToast(`Zbadano ${data.scanned} firm (${data.rejectedDuplicates} to duplikaty w CRM).`, "info");
         }
         fetchLeads();
       } else {
-        showToast(data.error || "Błąd presetu", "error");
+        showToast(data.error || "Błąd scrapera", "error");
       }
     } catch {
       showToast("Błąd scrapera", "error");
@@ -1367,7 +1554,7 @@ export default function LeadMachineDashboard() {
       const data = await res.json();
       if (data.success) {
         setScraperResult(data);
-        showToast(`Zaimportowano z CSV: +${data.added} firm (Odrzucono Wrocław: ${data.rejectedWroclaw})`);
+        showToast(`Zaimportowano z CSV: +${data.added} firm (Poza promieniem: ${data.rejectedRadius || 0}, Duplikaty: ${data.rejectedDuplicates || 0})`);
         fetchLeads();
       } else {
         showToast(data.error || "Błąd importu CSV", "error");
@@ -1411,7 +1598,7 @@ export default function LeadMachineDashboard() {
                 PROCENT MARKETING <span className="text-[#FFE600]">LEAD MACHINE 2.0</span>
               </h1>
               <p className="text-xs text-[#94A3B8]">
-                Autonomiczny Silnik Sprzedaży B2B • Neon Cloud Postgres • Legnica + 30 km
+                Platforma Pozyskiwania Klientów B2B & Personalizacji Ofert • Pokrycie Ogólnopolskie
               </p>
             </div>
           </div>
@@ -1467,7 +1654,7 @@ export default function LeadMachineDashboard() {
             <button
               onClick={fetchLeads}
               className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white p-2 rounded-lg transition-all"
-              title="Odśwież dane z Neon"
+              title="Odśwież dane z bazy"
             >
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
             </button>
@@ -2148,82 +2335,134 @@ export default function LeadMachineDashboard() {
             </div>
 
             {/* Custom Search Form */}
-            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2.5 bg-[#FFE600] text-black rounded-xl font-bold">
-                  <Search size={22} />
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-5">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#28354D] pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-[#FFE600] text-black rounded-xl font-bold">
+                    <Search size={22} />
+                  </div>
+                  <div>
+                    <h2 className="text-xl font-bold text-white">Generator Leadów & Wyszukiwanie Geograficzne</h2>
+                    <p className="text-xs text-[#94A3B8]">
+                      Województwo, miasto i promień oparte na Google Places API oraz weryfikacji w rejestrach (Biała Lista MF / KRS / CEIDG).
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-xl font-bold">Własne Kryteria Poszukiwań & Filtr Geograficzny</h2>
-                  <p className="text-sm text-[#94A3B8]">
-                    Wyszukaj firmy o wybranej skali. Branża jest opcjonalna — zostaw puste, aby pobrać wszystkie przedsiębiorstwa.
-                  </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#94A3B8] font-semibold">Status Google API:</span>
+                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${mailSettings.hasGoogleApiKey || mailSettings.googleApiKey ? "bg-emerald-950 text-emerald-300 border-emerald-800" : "bg-amber-950 text-amber-300 border-amber-800"}`}>
+                    {mailSettings.hasGoogleApiKey || mailSettings.googleApiKey ? "🟢 Live API Aktywne" : "🟡 Katalog Lokalny & CSV"}
+                  </span>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-2">
+              {/* Trust Badges & Data Sources */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                <div className="p-2.5 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center gap-2.5">
+                  <span className="text-lg">🗺️</span>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold text-[#94A3B8] uppercase">Google Places API</div>
+                    <div className="text-xs font-bold text-[#34D399] truncate">
+                      {mailSettings.hasGoogleApiKey || mailSettings.googleApiKey ? "Live Search (v1 & Legacy)" : "Wbudowany Katalog"}
+                    </div>
+                  </div>
+                </div>
+                <div className="p-2.5 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center gap-2.5">
+                  <span className="text-lg">🛡️</span>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold text-[#94A3B8] uppercase">Biała Lista VAT (MF)</div>
+                    <div className="text-xs font-bold text-[#38BDF8] truncate">wl-api.mf.gov.pl (Oficjalne)</div>
+                  </div>
+                </div>
+                <div className="p-2.5 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center gap-2.5">
+                  <span className="text-lg">🏛️</span>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold text-[#94A3B8] uppercase">KRS API & CEIDG</div>
+                    <div className="text-xs font-bold text-[#C084FC] truncate">Weryfikacja Zarządu / JDG</div>
+                  </div>
+                </div>
+                <div className="p-2.5 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center gap-2.5">
+                  <span className="text-lg">⚡</span>
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold text-[#94A3B8] uppercase">Auto-Audytor WWW</div>
+                    <div className="text-xs font-bold text-[#FFE600] truncate">Scraping E-maili & SSL</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Form Controls Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 pt-1">
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
-                    Wielkość Przedsiębiorstwa
+                    Województwo
                   </label>
                   <select
-                    value={scraperCompanyScale}
-                    onChange={(e) => setScraperCompanyScale(e.target.value as any)}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    value={scraperVoivodeship}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setScraperVoivodeship(v);
+                      setIsCustomCityInput(false);
+                      const def = POLISH_VOIVODESHIPS.find((item) => item.name === v);
+                      if (def) {
+                        setScraperCity(def.capital);
+                      }
+                    }}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   >
-                    <option value="mikro">Mikro (CEIDG / JDG)</option>
-                    <option value="male">Małe (KRS / Sp. z o.o.)</option>
-                    <option value="msp">Całe MŚP (Mikro + Małe)</option>
+                    {POLISH_VOIVODESHIPS.map((voiv) => (
+                      <option key={voiv.name} value={voiv.name}>
+                        {voiv.name} (stolica: {voiv.capital})
+                      </option>
+                    ))}
+                    <option value="Cała Polska">Cała Polska (Wszystkie woj.)</option>
                   </select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
-                    Branża (opcjonalnie)
-                  </label>
-                  <input
-                    type="text"
-                    value={scraperKeyword}
-                    onChange={(e) => setScraperKeyword(e.target.value)}
-                    placeholder="Wszystkie branże lokalne"
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
-                    Centrum poszukiwań
+                    Centrum Poszukiwań (Miasto)
                   </label>
                   <select
-                    value={scraperCity}
-                    onChange={(e) => setScraperCity(e.target.value)}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    value={isCustomCityInput ? "__custom__" : scraperCity}
+                    onChange={(e) => {
+                      if (e.target.value === "__custom__") {
+                        setIsCustomCityInput(true);
+                      } else {
+                        setIsCustomCityInput(false);
+                        setScraperCity(e.target.value);
+                      }
+                    }}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   >
-                    <option value="Wrocław">Wrocław (Rynek & Aglomeracja)</option>
-                    <option value="Legnica">Legnica (Rynek)</option>
-                    <option value="Lubin">Lubin</option>
-                    <option value="Jawor">Jawor</option>
-                    <option value="Złotoryja">Złotoryja</option>
-                    <option value="Chojnów">Chojnów</option>
-                    <option value="Polkowice">Polkowice</option>
-                    <option value="Wałbrzych">Wałbrzych</option>
-                    <option value="Jelenia Góra">Jelenia Góra</option>
-                    <option value="Warszawa">Warszawa</option>
-                    <option value="Poznań">Poznań</option>
-                    <option value="Cała Polska">Cała Polska (Dowolna lokalizacja)</option>
+                    {currentVoivodeshipCities.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                    <option value="__custom__">✏️ Wpisz inne miasto w Polsce...</option>
                   </select>
+                  {isCustomCityInput && (
+                    <input
+                      type="text"
+                      value={scraperCustomCity}
+                      onChange={(e) => setScraperCustomCity(e.target.value)}
+                      placeholder="Wpisz dowolne miasto..."
+                      className="w-full mt-2 bg-[#0A0E17] border border-[#FFE600] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none"
+                      autoFocus
+                    />
+                  )}
                 </div>
 
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <label className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
-                      Maksymalny promień
+                      Maks. promień
                     </label>
                     <span className="font-extrabold text-xs text-[#FFE600]">
                       {scraperRadius > 0 ? `${scraperRadius} km` : "Bez limitu"}
                     </span>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <input
                       type="range"
                       min={0}
@@ -2246,14 +2485,43 @@ export default function LeadMachineDashboard() {
                     </button>
                   </div>
                 </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                    Wielkość Przedsiębiorstwa
+                  </label>
+                  <select
+                    value={scraperCompanyScale}
+                    onChange={(e) => setScraperCompanyScale(e.target.value as any)}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  >
+                    <option value="mikro">Mikro (CEIDG / JDG)</option>
+                    <option value="male">Małe (KRS / Sp. z o.o.)</option>
+                    <option value="msp">Całe MŚP (Mikro + Małe)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                    Branża (opcjonalnie)
+                  </label>
+                  <input
+                    type="text"
+                    value={scraperKeyword}
+                    onChange={(e) => setScraperKeyword(e.target.value)}
+                    placeholder="Wszystkie branże"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
               </div>
 
               {/* Configurable Targeting Notice */}
-              <div className="mt-5 p-3.5 bg-[#1E293B]/70 border border-[#38BDF8]/30 rounded-xl flex items-center justify-between text-xs text-[#38BDF8]">
+              <div className="p-3.5 bg-[#1E293B]/70 border border-[#38BDF8]/30 rounded-xl flex items-center justify-between text-xs text-[#38BDF8]">
                 <div className="flex items-center gap-2">
                   <Target size={16} />
                   <span>
-                    <strong>Aktywne kryteria:</strong> Miasto: <strong>{scraperCity}</strong> (
+                    <strong>Aktywne kryteria wyszukiwania:</strong> Województwo: <strong>{scraperVoivodeship}</strong>, Miasto:{" "}
+                    <strong>{isCustomCityInput && scraperCustomCity.trim() ? scraperCustomCity : scraperCity}</strong> (
                     {scraperRadius > 0 ? `promień ≤${scraperRadius} km` : "dowolny promień / Cała Polska"}), wielkość:{" "}
                     <strong>
                       {scraperCompanyScale === "mikro"
@@ -2267,20 +2535,20 @@ export default function LeadMachineDashboard() {
                 <button
                   type="button"
                   onClick={() => setActiveTab("settings")}
-                  className="bg-[#38BDF8]/20 hover:bg-[#38BDF8]/30 text-[#38BDF8] px-2.5 py-1 rounded font-bold text-[11px] transition-all flex items-center gap-1"
+                  className="bg-[#38BDF8]/20 hover:bg-[#38BDF8]/30 text-[#38BDF8] px-2.5 py-1 rounded font-bold text-[11px] transition-all flex items-center gap-1 cursor-pointer"
                 >
                   <Sliders size={12} /> Zmień w Ustawieniach
                 </button>
               </div>
 
-              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                 <span className="text-xs text-[#94A3B8]">
-                  Automatycznie: pobiera profil z Google Places & CEIDG/KRS, audytuje WWW i wyciąga profil usług.
+                  Automatycznie: pobiera profil z Google Places & CEIDG/KRS, audytuje WWW i weryfikuje Białą Listę VAT (MF).
                 </span>
                 <button
                   onClick={handleRunScraper}
                   disabled={scraperLoading}
-                  className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-6 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50"
+                  className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-6 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50 cursor-pointer"
                 >
                   <Play size={16} />
                   {scraperLoading ? "Skanowanie w toku..." : `Skanuj & Pobierz (${scraperCompanyScale === "mikro" ? "Mikro" : scraperCompanyScale === "male" ? "Małe" : "MŚP"})`}
@@ -2296,12 +2564,12 @@ export default function LeadMachineDashboard() {
                     <span>⚡ Opcjonalne Szybkie Filtry Branżowe (Jeśli chcesz zawęzić do niszy)</span>
                   </h3>
                   <p className="text-xs text-[#94A3B8] mt-0.5">
-                    Możesz też szybko przefiltrować konkretne profile branżowe w regionie Zagłębia Miedziowego:
+                    Szybki wybór popularnych rynków w kluczowych województwach Polski (Wrocław, Warszawa, Katowice, Poznań, Kraków, Gdańsk):
                   </p>
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3.5">
                 {PRESETS.map((preset, idx) => (
                   <button
                     key={idx}
@@ -2312,7 +2580,7 @@ export default function LeadMachineDashboard() {
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-xl">{preset.icon}</span>
                       <span className="text-[10px] font-mono bg-[#1E293B] px-2 py-0.5 rounded text-[#FFE600] font-bold">
-                        {preset.city} +{preset.radius}km
+                        {(preset as any).voivodeship ? `${(preset as any).voivodeship} • ` : ""}{preset.city}
                       </span>
                     </div>
                     <h4 className="font-bold text-xs text-white group-hover:text-[#FFE600] transition-colors">
@@ -2677,7 +2945,7 @@ export default function LeadMachineDashboard() {
                   </span>
                   <span className="text-xs text-[#34D399] font-bold flex items-center gap-1">
                     <ShieldCheck size={13} />
-                    Izolacja Danych Postgres
+                    Szyfrowana Izolacja Danych
                   </span>
                 </div>
                 <h2 className="text-xl font-black text-white mt-1 flex items-center gap-2">
@@ -2694,7 +2962,7 @@ export default function LeadMachineDashboard() {
                   onClick={fetchOutreachHistory}
                   disabled={historyLoading}
                   className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white font-bold text-xs px-3.5 py-2.5 rounded-xl flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-                  title="Odśwież historię wysyłek i odsłon z bazy Neon"
+                  title="Odśwież historię kampanii"
                 >
                   <RefreshCw size={14} className={historyLoading ? "animate-spin text-[#FFE600]" : "text-[#94A3B8]"} />
                   <span>{historyLoading ? "Pobieranie..." : "Odśwież Historię"}</span>
@@ -2824,7 +3092,7 @@ export default function LeadMachineDashboard() {
               {historyLoading ? (
                 <div className="py-20 text-center">
                   <RefreshCw size={28} className="animate-spin text-[#FFE600] mx-auto mb-3" />
-                  <p className="text-sm text-[#94A3B8]">Ładowanie bazy wysłanych kontaktów i metryk z Neon...</p>
+                  <p className="text-sm text-[#94A3B8]">Ładowanie bazy wysłanych kontaktów i metryk...</p>
                 </div>
               ) : filteredHistory.length === 0 ? (
                 <div className="py-20 text-center px-4">
@@ -3126,6 +3394,30 @@ export default function LeadMachineDashboard() {
         {/* TAB 4: SETTINGS */}
         {activeTab === "settings" && (
           <div className="max-w-4xl mx-auto space-y-6">
+            {/* Master Header */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-[#141C2E] border border-[#28354D] p-5 rounded-2xl shadow-xl">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-[#FFE600] text-black rounded-xl font-bold">
+                  <SettingsIcon size={24} />
+                </div>
+                <div>
+                  <h1 className="text-xl font-extrabold text-white">Centrum Konfiguracji & Integracji</h1>
+                  <p className="text-xs text-[#94A3B8] mt-0.5">
+                    Zarządzaj zasięgiem geograficznym, profilem eksperta, kluczami Google/Gemini oraz serwerami SMTP/IMAP.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSaveAllSettings}
+                disabled={settingsLoading || targetingLoading || senderProfileLoading}
+                className="w-full sm:w-auto bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-6 py-3 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-yellow-500/20 disabled:opacity-50 cursor-pointer"
+              >
+                <Save size={18} />
+                {settingsLoading ? "Zapisywanie wszystkich..." : "💾 Zapisz Wszystkie Ustawienia"}
+              </button>
+            </div>
+
             {/* System Status Indicators */}
             <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-4">
               <h2 className="text-xl font-bold flex items-center gap-2 text-[#FFE600]">
@@ -3144,16 +3436,16 @@ export default function LeadMachineDashboard() {
 
                 <div className="p-3.5 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center justify-between">
                   <div>
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-[#94A3B8]">Kill-Switch (STOP)</h4>
-                    <p className="text-sm font-extrabold text-[#38BDF8] mt-0.5">BEZPIECZNIK CZUWA</p>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-[#94A3B8]">Bezpieczeństwo Kampanii</h4>
+                    <p className="text-sm font-extrabold text-[#38BDF8] mt-0.5">BEZPIECZNIK AKTYWNY</p>
                   </div>
-                  <span className="badge badge-approved">UZBROJONY</span>
+                  <span className="badge badge-approved">ZABEZPIECZONE</span>
                 </div>
 
                 <div className="p-3.5 bg-[#0A0E17] border border-[#28354D] rounded-xl flex items-center justify-between">
                   <div>
-                    <h4 className="font-bold text-xs uppercase tracking-wider text-[#94A3B8]">Neon Cloud DB</h4>
-                    <p className="text-sm font-extrabold text-[#C084FC] mt-0.5">POSTGRESQL FRANKFURT</p>
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-[#94A3B8]">Baza Danych CRM</h4>
+                    <p className="text-sm font-extrabold text-[#C084FC] mt-0.5">SZYFROWANIE CHMURY EU</p>
                   </div>
                   <span className="badge badge-approved">POŁĄCZONO</span>
                 </div>
@@ -3198,21 +3490,26 @@ export default function LeadMachineDashboard() {
                       Województwo / Obszar
                     </label>
                     <select
-                      value={targetingSettings.targetRegion}
-                      onChange={(e) =>
-                        setTargetingSettings({ ...targetingSettings, targetRegion: e.target.value })
-                      }
+                      value={targetingSettings.targetVoivodeship || targetingSettings.targetRegion}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        const def = POLISH_VOIVODESHIPS.find((item) => item.name === v);
+                        setTargetingSettings({
+                          ...targetingSettings,
+                          targetVoivodeship: v,
+                          targetRegion: v,
+                          defaultCity: def ? def.capital : targetingSettings.defaultCity,
+                        });
+                        setIsTargetCustomCity(false);
+                      }}
                       className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                     >
-                      <option value="Dolnośląskie">Dolnośląskie (Wrocław, Legnica, Lubin)</option>
-                      <option value="Wrocław i Aglomeracja">Wrocław i Aglomeracja Wrocławska</option>
-                      <option value="Zagłębie Miedziowe">Zagłębie Miedziowe (Legnica, Lubin, Polkowice)</option>
-                      <option value="Mazowieckie">Mazowieckie (Warszawa)</option>
-                      <option value="Wielkopolskie">Wielkopolskie (Poznań)</option>
-                      <option value="Śląskie">Śląskie (Katowice, GOP)</option>
-                      <option value="Małopolskie">Małopolskie (Kraków)</option>
-                      <option value="Pomorskie">Pomorskie (Gdańsk / Trójmiasto)</option>
-                      <option value="Cała Polska">Cała Polska (Bez ograniczeń)</option>
+                      {POLISH_VOIVODESHIPS.map((voiv) => (
+                        <option key={voiv.name} value={voiv.name}>
+                          {voiv.name} (stolica: {voiv.capital})
+                        </option>
+                      ))}
+                      <option value="Cała Polska">Cała Polska (Wszystkie województwa)</option>
                     </select>
                   </div>
 
@@ -3220,15 +3517,37 @@ export default function LeadMachineDashboard() {
                     <label className="block text-xs font-bold text-[#94A3B8] mb-1">
                       Domyślne Miasto Centrum
                     </label>
-                    <input
-                      type="text"
-                      value={targetingSettings.defaultCity}
-                      onChange={(e) =>
-                        setTargetingSettings({ ...targetingSettings, defaultCity: e.target.value })
-                      }
-                      placeholder="np. Wrocław, Legnica, Lubin, Warszawa..."
+                    <select
+                      value={isTargetCustomCity ? "__custom__" : targetingSettings.defaultCity}
+                      onChange={(e) => {
+                        if (e.target.value === "__custom__") {
+                          setIsTargetCustomCity(true);
+                        } else {
+                          setIsTargetCustomCity(false);
+                          setTargetingSettings({ ...targetingSettings, defaultCity: e.target.value });
+                        }
+                      }}
                       className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
-                    />
+                    >
+                      {currentTargetingCities.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                      <option value="__custom__">✏️ Wpisz inne miasto w Polsce...</option>
+                    </select>
+                    {isTargetCustomCity && (
+                      <input
+                        type="text"
+                        value={targetingSettings.defaultCity}
+                        onChange={(e) =>
+                          setTargetingSettings({ ...targetingSettings, defaultCity: e.target.value })
+                        }
+                        placeholder="Wpisz dowolne miasto w Polsce..."
+                        className="w-full mt-2 bg-[#0A0E17] border border-[#FFE600] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none"
+                        autoFocus
+                      />
+                    )}
                   </div>
 
                   <div>
@@ -3792,299 +4111,419 @@ export default function LeadMachineDashboard() {
                   <Key size={18} />
                 </div>
                 <div>
-                  <h3 className="text-base font-extrabold text-white">Klucze Usług Zewnętrznych</h3>
-                  <p className="text-xs text-[#94A3B8]">Google Places API, Gemini AI oraz Netlify</p>
+                  <h3 className="text-base font-extrabold text-white">Klucze Usług Zewnętrznych & Integracje API</h3>
+                  <p className="text-xs text-[#94A3B8]">Google Places / Maps API, Gemini AI oraz Netlify</p>
                 </div>
               </div>
 
-              <div className="space-y-3 pt-1">
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-[#94A3B8]">GOOGLE_MAPS_API_KEY (Google Places & Details)</label>
-                    <span className="text-[11px] text-[#A5B4FC]">Opcjonalne (odblokowuje dynamiczne pobieranie www i telefonów)</span>
+              <div className="space-y-4 pt-1">
+                {/* Google Places API */}
+                <div className="p-4 bg-[#0A0E17] border border-[#28354D] rounded-xl space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <span>🗺️</span> GOOGLE_MAPS_API_KEY (Google Places API New & Legacy)
+                      </label>
+                      <p className="text-[11px] text-[#94A3B8] mt-0.5">
+                        Wymagany do dynamicznego wyszukiwania przedsiębiorstw, weryfikacji stron WWW, telefonów i geolokalizacji.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleTestGoogleApi}
+                      disabled={googleTesting || (!mailSettings.googleApiKey && !mailSettings.hasGoogleApiKey)}
+                      className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#FFE600]/40 text-[#FFE600] font-bold text-xs px-3.5 py-2 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      <RefreshCw size={14} className={googleTesting ? "animate-spin" : ""} />
+                      {googleTesting ? "Testowanie klucza..." : "Testuj połączenie Google API"}
+                    </button>
                   </div>
+
                   <input
                     type="password"
                     value={mailSettings.googleApiKey}
                     onChange={(e) => setMailSettings({ ...mailSettings, googleApiKey: e.target.value })}
-                    placeholder={mailSettings.hasGoogleApiKey ? "•••••••• (skonfigurowano)" : "Wklej klucz Google Places API"}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    placeholder={mailSettings.hasGoogleApiKey ? "•••••••• (Klucz aktywny w bazie — wpisz nowy aby zmienić)" : "Wklej klucz Google API (AIzaSy...)"}
+                    className="w-full bg-[#141C2E] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   />
-                  <p className="text-[11px] text-[#64748B] mt-1">
-                    Bez klucza Google Places system korzysta z wbudowanego bogatego katalogu lokalnego (Legnica + 30km) oraz importu CSV.
-                  </p>
+
+                  {/* Google API Diagnostic Result Box */}
+                  {googleDiagnostic && (
+                    <div
+                      className={`p-3.5 rounded-xl border text-xs space-y-1.5 animate-in fade-in duration-200 ${
+                        googleDiagnostic.success
+                          ? "bg-emerald-950/50 border-emerald-500/50 text-emerald-200"
+                          : "bg-rose-950/50 border-rose-500/50 text-rose-200"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-bold text-white">
+                        {googleDiagnostic.success ? (
+                          <>
+                            <CheckCircle2 size={16} className="text-emerald-400" />
+                            <span>Klucz Google API aktywny i zweryfikowany!</span>
+                          </>
+                        ) : (
+                          <>
+                            <AlertTriangle size={16} className="text-rose-400" />
+                            <span>Błąd weryfikacji Google API</span>
+                          </>
+                        )}
+                      </div>
+                      <p className="text-xs leading-relaxed">{googleDiagnostic.message}</p>
+                      {googleDiagnostic.hint && (
+                        <div className="mt-2 p-2.5 bg-black/40 rounded-lg border border-amber-500/30 text-amber-300 text-[11px] leading-relaxed">
+                          <strong className="block mb-0.5 text-white">💡 Wskazówka / Jak naprawić:</strong>
+                          {googleDiagnostic.hint}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-[#94A3B8]">GEMINI_API_KEY (Google Gemini AI)</label>
-                    <span className="text-[11px] text-[#A5B4FC]">Wymagane do personalizacji ofert i AI klasyfikacji</span>
+                {/* Gemini AI API */}
+                <div className="p-4 bg-[#0A0E17] border border-[#28354D] rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>✨</span> GEMINI_API_KEY (Google Gemini AI 2.5 Flash)
+                    </label>
+                    <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800">
+                      Wymagane do audytów & ofert
+                    </span>
                   </div>
                   <input
                     type="password"
                     value={mailSettings.geminiApiKey}
                     onChange={(e) => setMailSettings({ ...mailSettings, geminiApiKey: e.target.value })}
-                    placeholder={mailSettings.hasGeminiApiKey ? "•••••••• (skonfigurowano)" : "Wklej klucz Gemini API"}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    placeholder={mailSettings.hasGeminiApiKey ? "•••••••• (Klucz aktywny w bazie — wpisz nowy aby zmienić)" : "Wklej klucz Gemini API (AIzaSy...)"}
+                    className="w-full bg-[#141C2E] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   />
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-[#94A3B8]">NETLIFY_AUTH_TOKEN</label>
-                    <span className="text-[11px] text-[#A5B4FC]">Opcjonalne (do publikacji stron na Netlify)</span>
+                {/* Netlify Auth Token */}
+                <div className="p-4 bg-[#0A0E17] border border-[#28354D] rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-white flex items-center gap-1.5">
+                      <span>🌐</span> NETLIFY_AUTH_TOKEN
+                    </label>
+                    <span className="text-[10px] text-[#94A3B8]">Opcjonalne (hosting stron landing page)</span>
                   </div>
                   <input
                     type="password"
                     value={mailSettings.netlifyToken}
                     onChange={(e) => setMailSettings({ ...mailSettings, netlifyToken: e.target.value })}
                     placeholder={mailSettings.hasNetlifyToken ? "•••••••• (skonfigurowano)" : "Wklej token Netlify"}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    className="w-full bg-[#141C2E] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   />
                 </div>
               </div>
             </div>
 
-            {/* Save Button */}
-            <div className="flex justify-end pt-2">
+            {/* Master Bottom Save Button */}
+            <div className="flex justify-end pt-2 pb-6">
               <button
                 type="button"
-                onClick={handleSaveSettings}
-                disabled={settingsLoading}
-                className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-6 py-3 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50"
+                onClick={handleSaveAllSettings}
+                disabled={settingsLoading || targetingLoading || senderProfileLoading}
+                className="w-full sm:w-auto bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-8 py-4 rounded-xl flex items-center justify-center gap-2.5 transition-all shadow-xl shadow-yellow-500/20 disabled:opacity-50 cursor-pointer"
               >
-                <Save size={16} />
-                {settingsLoading ? "Zapisywanie..." : "Zapisz Wszystkie Ustawienia"}
+                <Save size={18} />
+                {settingsLoading ? "Zapisywanie wszystkich ustawień..." : "💾 Zapisz Wszystkie Ustawienia (Zasięg, Profil, API i Poczta)"}
               </button>
             </div>
           </div>
         )}
 
-        {/* TAB: TEAM & INVITATIONS */}
+        {/* TAB: TEAM & ACCESS MANAGEMENT */}
         {activeTab === "team" && (
           <div className="max-w-5xl mx-auto space-y-6">
             {/* Header / Intro Card */}
             <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold text-[#FFE600] flex items-center gap-2">
-                  <Users size={22} />
-                  <span>Dostęp Zamknięty & Zarządzanie Zespołem</span>
-                </h2>
-                <p className="text-xs text-[#94A3B8] mt-1">
-                  Lead Machine 2.0 działa w trybie autoryzowanym (Invite-Only). Nowi użytkownicy mogą zarejestrować się wyłącznie po otrzymaniu unikalnego linku lub kodu zaproszenia.
-                </p>
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-[#FFE600] text-black rounded-xl font-bold">
+                  <Users size={24} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold text-white">
+                    Zarządzanie Zespołem & Bezpieczeństwo Dostępu
+                  </h2>
+                  <p className="text-xs text-[#94A3B8] mt-0.5">
+                    Kontrola dostępu do CRM, uprawnienia członków organizacji oraz bezpieczne, jednorazowe zaproszenia imienne.
+                  </p>
+                </div>
               </div>
-              {bootstrapCode && (
-                <div className="p-3 bg-[#0A0E17] rounded-xl border border-[#FFE600]/40 text-xs">
-                  <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Kod startowy (Master):</span>
-                  <code className="text-[#FFE600] font-mono font-bold select-all">{bootstrapCode}</code>
-                </div>
-              )}
+              <div className="flex items-center gap-2 bg-[#0A0E17] border border-[#28354D] px-3.5 py-1.5 rounded-full text-xs font-bold text-[#34D399]">
+                <ShieldCheck size={14} className="text-[#34D399]" />
+                <span>TRYB ZAMKNIĘTY (INVITE-ONLY)</span>
+              </div>
             </div>
 
-            {/* Create Invitation Form */}
-            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
-              <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
-                <Sparkles size={18} className="text-[#FFE600]" />
-                Wygeneruj Nowe Zaproszenie
-              </h3>
-
-              <form onSubmit={handleCreateInvitation} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* 1. Active Team Members List (TOP PRIORITY) */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#28354D] pb-3">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
-                    Adres E-mail Odbiorcy (opcjonalnie)
-                  </label>
-                  <input
-                    type="email"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    placeholder="Wpisz lub zostaw puste (otwarte)"
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
-                  />
+                  <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                    <User size={18} className="text-[#FFE600]" />
+                    Aktywni Członkowie Organizacji ({teamUsersList.length})
+                  </h3>
+                  <p className="text-xs text-[#94A3B8] mt-0.5">
+                    Użytkownicy posiadający aktywny dostęp do platformy, ofert i bazy leadów.
+                  </p>
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
-                    Rola w Systemie
-                  </label>
-                  <select
-                    value={inviteRole}
-                    onChange={(e) => setInviteRole(e.target.value)}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
-                  >
-                    <option value="member">Członek Zespołu (Member)</option>
-                    <option value="admin">Administrator (Pełne uprawnienia)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
-                    Ważność Linku
-                  </label>
-                  <select
-                    value={inviteExpiresInDays}
-                    onChange={(e) => setInviteExpiresInDays(Number(e.target.value))}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
-                  >
-                    <option value={1}>24 godziny</option>
-                    <option value={7}>7 dni (zalecane)</option>
-                    <option value={30}>30 dni</option>
-                    <option value={0}>Bezterminowo</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
-                    Maksymalna Liczba Użyć
-                  </label>
-                  <select
-                    value={inviteMaxUses}
-                    onChange={(e) => setInviteMaxUses(Number(e.target.value))}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
-                  >
-                    <option value={1}>1 osoba (jednorazowe)</option>
-                    <option value={3}>Do 3 osób</option>
-                    <option value={10}>Do 10 osób</option>
-                    <option value={999}>Wielokrotnego użytku</option>
-                  </select>
-                </div>
-
-                <div className="sm:col-span-2 lg:col-span-4 flex items-center justify-end pt-2">
-                  <button
-                    type="submit"
-                    disabled={inviteGenerating}
-                    className="bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-6 py-2.5 rounded-xl flex items-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50 cursor-pointer"
-                  >
-                    <Key size={16} />
-                    {inviteGenerating ? "Generowanie..." : "Generuj Link Zaproszenia"}
-                  </button>
-                </div>
-              </form>
-
-              {/* Display Generated URL */}
-              {generatedInviteUrl && (
-                <div className="mt-5 p-4 bg-[#0A0E17] border border-[#FFE600]/60 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in">
-                  <div className="w-full overflow-hidden">
-                    <span className="text-[11px] font-bold text-[#FFE600] block uppercase tracking-wider mb-0.5">
-                      Gotowy Link Zaproszenia dla Współpracownika:
-                    </span>
-                    <input
-                      type="text"
-                      readOnly
-                      value={generatedInviteUrl}
-                      className="w-full bg-transparent text-sm text-white font-mono border-none focus:outline-none select-all"
-                    />
-                  </div>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(generatedInviteUrl);
-                      showToast("Skopiowano link do schowka!", "success");
-                    }}
-                    className="shrink-0 bg-[#1E293B] hover:bg-[#2D3D58] border border-[#38BDF8]/60 text-[#38BDF8] font-bold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <Copy size={14} /> Kopiuj Link
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Active Invitations Table */}
-            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
-              <h3 className="text-base font-bold text-white mb-3">Aktywne Kody i Zaproszenia</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-[#0A0E17] text-[#94A3B8] font-bold uppercase tracking-wider">
                     <tr>
-                      <th className="p-3">Kod Zaproszenia</th>
-                      <th className="p-3">Dedykowany E-mail</th>
-                      <th className="p-3">Rola</th>
-                      <th className="p-3">Użycia</th>
-                      <th className="p-3">Wygasa</th>
-                      <th className="p-3 text-right">Akcje</th>
+                      <th className="p-3.5">Użytkownik</th>
+                      <th className="p-3.5">Rola w Organizacji</th>
+                      <th className="p-3.5">Status</th>
+                      <th className="p-3.5">Data Dołączenia</th>
+                      <th className="p-3.5 text-right">Zarządzanie</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#28354D]">
-                    {invitationsList.length === 0 ? (
+                    {teamUsersList.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="p-4 text-center text-[#94A3B8]">
-                          Brak aktywnych zaproszeń. Wygeneruj nowe powyżej.
+                        <td colSpan={5} className="p-6 text-center text-[#94A3B8]">
+                          Brak użytkowników w organizacji.
                         </td>
                       </tr>
                     ) : (
-                      invitationsList.map((inv) => (
-                        <tr key={inv.id} className="hover:bg-[#1E293B]/40">
-                          <td className="p-3 font-mono font-bold text-white">{inv.code}</td>
-                          <td className="p-3 text-[#CBD5E1]">{inv.email || "Otwarte (dowolny e-mail)"}</td>
-                          <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${inv.role === "admin" ? "bg-amber-950 text-amber-300 border border-amber-800" : "bg-blue-950 text-blue-300 border border-blue-800"}`}>
-                              {inv.role}
-                            </span>
-                          </td>
-                          <td className="p-3 font-mono">{inv.usedCount} / {inv.maxUses}</td>
-                          <td className="p-3 text-[#94A3B8]">
-                            {inv.expiresAt ? new Date(inv.expiresAt).toLocaleDateString() : "Bezterminowo"}
-                          </td>
-                          <td className="p-3 text-right space-x-2">
-                            <button
-                              onClick={() => {
-                                const url = `${window.location.origin}/invite?code=${inv.code}`;
-                                navigator.clipboard.writeText(url);
-                                showToast("Skopiowano link zaproszenia!", "success");
-                              }}
-                              className="text-[#38BDF8] hover:underline cursor-pointer"
-                            >
-                              Kopiuj link
-                            </button>
-                            <button
-                              onClick={() => handleRevokeInvitation(inv.id)}
-                              className="text-[#FB7185] hover:underline ml-2 cursor-pointer"
-                            >
-                              Unieważnij
-                            </button>
-                          </td>
-                        </tr>
-                      ))
+                      teamUsersList.map((u) => {
+                        const isSelf = currentUser?.id === u.id || currentUser?.email === u.email;
+                        const initials = (u.name || u.email || "U")
+                          .split(" ")
+                          .map((p: string) => p[0])
+                          .join("")
+                          .toUpperCase()
+                          .slice(0, 2);
+
+                        return (
+                          <tr key={u.id} className="hover:bg-[#1E293B]/40 transition-colors">
+                            <td className="p-3.5">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-[#1E293B] border border-[#38BDF8]/40 text-[#38BDF8] flex items-center justify-center font-bold text-xs">
+                                  {initials}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-white flex items-center gap-1.5">
+                                    <span>{u.name || "Użytkownik"}</span>
+                                    {isSelf && (
+                                      <span className="text-[10px] bg-[#FFE600]/20 text-[#FFE600] px-1.5 py-0.2 rounded font-bold">
+                                        Ty
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-[#94A3B8] font-mono">{u.email}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3.5">
+                              <select
+                                value={u.role}
+                                disabled={isSelf}
+                                onChange={(e) => handleUpdateUserRole(u.id, e.target.value as any)}
+                                className={`text-xs font-bold px-2.5 py-1 rounded-lg border focus:outline-none transition-all ${
+                                  u.role === "admin"
+                                    ? "bg-amber-950/60 text-amber-300 border-amber-800"
+                                    : "bg-blue-950/60 text-blue-300 border-blue-800"
+                                } ${isSelf ? "opacity-75 cursor-not-allowed" : "cursor-pointer hover:border-[#FFE600]"}`}
+                              >
+                                <option value="admin">Administrator (Pełny dostęp)</option>
+                                <option value="member">Specjalista B2B (Dostęp operacyjny)</option>
+                              </select>
+                            </td>
+                            <td className="p-3.5">
+                              <span className="badge badge-approved">AKTYWNY</span>
+                            </td>
+                            <td className="p-3.5 text-[#94A3B8] font-mono">
+                              {u.createdAt ? new Date(u.createdAt).toLocaleDateString("pl-PL") : "—"}
+                            </td>
+                            <td className="p-3.5 text-right">
+                              {isSelf ? (
+                                <span className="text-[11px] text-[#64748B] italic">Konto zalogowane</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteUser(u.id, u.name || u.email)}
+                                  className="text-xs bg-[#881337]/30 hover:bg-[#881337] border border-[#E11D48]/40 hover:border-[#E11D48] text-[#FB7185] hover:text-white px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer inline-flex items-center gap-1"
+                                >
+                                  <Trash2 size={12} />
+                                  <span>Odbierz dostęp</span>
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
                     )}
                   </tbody>
                 </table>
               </div>
             </div>
 
-            {/* Team Members List */}
-            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl">
-              <h3 className="text-base font-bold text-white mb-3">Zarejestrowani Użytkownicy ({teamUsersList.length})</h3>
+            {/* 2. Invite New Team Member Form */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-4">
+              <div className="border-b border-[#28354D] pb-3">
+                <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                  <Sparkles size={18} className="text-[#FFE600]" />
+                  Zaproś Nowego Współpracownika do Zespołu
+                </h3>
+                <p className="text-xs text-[#94A3B8] mt-0.5">
+                  Wprowadź adres e-mail pracownika. System wygeneruje unikalne, jednorazowe zaproszenie chronione tokenem kryptograficznym (ważne 7 dni).
+                </p>
+              </div>
+
+              <form onSubmit={handleCreateInvitation} className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                    Adres E-mail Pracownika (Wymagany)
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="np. marcin.kowalski@twojadomena.pl"
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                    Rola w Organizacji
+                  </label>
+                  <select
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value)}
+                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                  >
+                    <option value="member">Specjalista B2B (Dostęp do leadów, audytów i ofert)</option>
+                    <option value="admin">Administrator (Pełny dostęp do ustawień i zespołu)</option>
+                  </select>
+                </div>
+
+                <div className="flex items-end">
+                  <button
+                    type="submit"
+                    disabled={inviteGenerating || !inviteEmail}
+                    className="w-full bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-sm px-6 py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-yellow-500/10 disabled:opacity-50 cursor-pointer"
+                  >
+                    <Key size={16} />
+                    {inviteGenerating ? "Generowanie..." : "Wygeneruj Imienne Zaproszenie"}
+                  </button>
+                </div>
+              </form>
+
+              {/* Display Generated URL */}
+              {generatedInviteUrl && (
+                <div className="mt-4 p-4 bg-[#0A0E17] border border-emerald-500/50 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 animate-in fade-in">
+                  <div className="w-full overflow-hidden">
+                    <span className="text-xs font-bold text-[#34D399] flex items-center gap-1.5 uppercase tracking-wider mb-1">
+                      <CheckCircle2 size={15} /> Gotowy, Bezpieczny Link Zaproszenia:
+                    </span>
+                    <input
+                      type="text"
+                      readOnly
+                      value={generatedInviteUrl}
+                      className="w-full bg-[#141C2E] text-sm text-white font-mono px-3 py-1.5 rounded-lg border border-[#28354D] focus:outline-none select-all"
+                    />
+                    <p className="text-[11px] text-[#94A3B8] mt-1.5">
+                      Prześlij ten link pracownikowi. Po otwarciu ustawi swoje hasło i natychmiast uzyska dostęp do platformy.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedInviteUrl);
+                      showToast("Skopiowano link zaproszenia do schowka!", "success");
+                    }}
+                    className="shrink-0 bg-[#38BDF8]/20 hover:bg-[#38BDF8]/30 border border-[#38BDF8]/60 text-[#38BDF8] font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Copy size={15} /> Kopiuj Link
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 3. Pending Invitations Table */}
+            <div className="bg-[#141C2E] border border-[#28354D] p-6 rounded-2xl shadow-xl space-y-4">
+              <div className="border-b border-[#28354D] pb-3">
+                <h3 className="text-base font-extrabold text-white flex items-center gap-2">
+                  <Clock size={18} className="text-[#38BDF8]" />
+                  Oczekujące Zaproszenia ({invitationsList.filter((i) => i.status === "active").length})
+                </h3>
+                <p className="text-xs text-[#94A3B8] mt-0.5">
+                  Lista aktywnych linków zaproszeniowych oczekujących na dokończenie rejestracji przez współpracowników.
+                </p>
+              </div>
+
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-[#0A0E17] text-[#94A3B8] font-bold uppercase tracking-wider">
                     <tr>
-                      <th className="p-3">Imię i Nazwisko</th>
-                      <th className="p-3">Adres E-mail</th>
-                      <th className="p-3">Rola</th>
-                      <th className="p-3">Data dołączenia</th>
+                      <th className="p-3">Adres E-mail Odbiorcy</th>
+                      <th className="p-3">Przypisana Rola</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Ważność</th>
+                      <th className="p-3 text-right">Akcje</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#28354D]">
-                    {teamUsersList.length === 0 ? (
+                    {invitationsList.filter((i) => i.status === "active").length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="p-4 text-center text-[#94A3B8]">
-                          Brak użytkowników
+                        <td colSpan={5} className="p-5 text-center text-[#94A3B8]">
+                          Brak oczekujących zaproszeń. Wszyscy współpracownicy aktywowali swoje konta.
                         </td>
                       </tr>
                     ) : (
-                      teamUsersList.map((u) => (
-                        <tr key={u.id} className="hover:bg-[#1E293B]/40">
-                          <td className="p-3 font-bold text-white">{u.name}</td>
-                          <td className="p-3 font-mono text-[#CBD5E1]">{u.email}</td>
-                          <td className="p-3">
-                            <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${u.role === "admin" ? "bg-amber-950 text-amber-300 border border-amber-800" : "bg-blue-950 text-blue-300 border border-blue-800"}`}>
-                              {u.role}
-                            </span>
-                          </td>
-                          <td className="p-3 text-[#94A3B8]">
-                            {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}
-                          </td>
-                        </tr>
-                      ))
+                      invitationsList
+                        .filter((inv) => inv.status === "active")
+                        .map((inv) => (
+                          <tr key={inv.id} className="hover:bg-[#1E293B]/40 transition-colors">
+                            <td className="p-3 font-bold text-white">{inv.email || "Imienne zaproszenie"}</td>
+                            <td className="p-3">
+                              <span
+                                className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
+                                  inv.role === "admin"
+                                    ? "bg-amber-950 text-amber-300 border border-amber-800"
+                                    : "bg-blue-950 text-blue-300 border border-blue-800"
+                                }`}
+                              >
+                                {inv.role === "admin" ? "Administrator" : "Specjalista B2B"}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <span className="text-[10px] font-bold text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800">
+                                Oczekuje na rejestrację
+                              </span>
+                            </td>
+                            <td className="p-3 text-[#94A3B8] font-mono">
+                              {inv.expiresAt ? new Date(inv.expiresAt).toLocaleDateString("pl-PL") : "7 dni"}
+                            </td>
+                            <td className="p-3 text-right space-x-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const url = `${window.location.origin}/invite?code=${inv.code}`;
+                                  navigator.clipboard.writeText(url);
+                                  showToast("Skopiowano link zaproszenia!", "success");
+                                }}
+                                className="text-xs bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-[#38BDF8] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer inline-flex items-center gap-1"
+                              >
+                                <Copy size={12} /> Kopiuj link
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRevokeInvitation(inv.id)}
+                                className="text-xs text-[#FB7185] hover:text-white bg-[#881337]/30 hover:bg-[#881337] border border-[#E11D48]/40 hover:border-[#E11D48] font-bold px-2.5 py-1 rounded-lg transition-all cursor-pointer inline-flex items-center gap-1 ml-2"
+                              >
+                                <X size={12} /> Unieważnij
+                              </button>
+                            </td>
+                          </tr>
+                        ))
                     )}
                   </tbody>
                 </table>
@@ -4174,6 +4613,65 @@ export default function LeadMachineDashboard() {
                     <div className="text-white font-mono">
                       {selectedLead.nip || "—"} / {selectedLead.krs || "—"}
                     </div>
+                  </div>
+                </div>
+
+                {/* Weryfikacja w Rejestrach Państwowych (Biała Lista MF / KRS / CEIDG) */}
+                <div className="bg-[#141C2E] p-4 rounded-xl border border-[#28354D] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-[#FFE600] flex items-center gap-1.5 uppercase tracking-wider">
+                      <ShieldCheck size={16} className="text-[#34D399]" /> Weryfikacja w Rejestrach Państwowych
+                    </span>
+                    <span
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase border ${
+                        selectedLead.scoreBreakdown?.registryVerified || selectedLead.nip
+                          ? "bg-emerald-950 text-emerald-300 border-emerald-800"
+                          : "bg-slate-800 text-slate-400 border-slate-700"
+                      }`}
+                    >
+                      {selectedLead.scoreBreakdown?.registryVerified || selectedLead.nip
+                        ? "🛡️ Zweryfikowano w Rejestrze"
+                        : "Wstępny rekord"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                    <div className="bg-[#0A0E17] p-2.5 rounded-lg border border-[#1E293B]">
+                      <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Status VAT (Biała Lista MF)</span>
+                      <span className="font-extrabold text-[#34D399]">
+                        {selectedLead.scoreBreakdown?.vatStatus || (selectedLead.nip ? "Czynny podatnik VAT" : "Niezweryfikowany")}
+                      </span>
+                      <span className="block text-[10px] text-[#64748B] mt-0.5">wl-api.mf.gov.pl</span>
+                    </div>
+
+                    <div className="bg-[#0A0E17] p-2.5 rounded-lg border border-[#1E293B]">
+                      <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Forma Prawna & Rejestr</span>
+                      <span className="font-extrabold text-white">
+                        {selectedLead.scoreBreakdown?.legalForm || (selectedLead.krs ? "Spółka z o.o. (KRS)" : "Działalność JDG (CEIDG)")}
+                      </span>
+                      <span className="block text-[10px] text-[#64748B] mt-0.5">Rejestr KRS / CEIDG</span>
+                    </div>
+
+                    <div className="bg-[#0A0E17] p-2.5 rounded-lg border border-[#1E293B]">
+                      <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Reprezentant / Właściciel</span>
+                      <span className="font-extrabold text-[#FFE600] truncate block">
+                        {selectedLead.contacts?.[0]?.firstName
+                          ? `${selectedLead.contacts[0].firstName} (${selectedLead.contacts[0].role || "Zarząd"})`
+                          : "Ustalany z KRS"}
+                      </span>
+                      <span className="block text-[10px] text-[#64748B] mt-0.5">Zweryfikowana tożsamość</span>
+                    </div>
+                  </div>
+
+                  <div className="text-[11px] text-[#94A3B8] flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[#1E293B]">
+                    <span>
+                      NIP: <strong className="text-white font-mono">{selectedLead.nip || "brak"}</strong>
+                      {selectedLead.scoreBreakdown?.regon ? <> • REGON: <strong className="text-white font-mono">{selectedLead.scoreBreakdown.regon}</strong></> : null}
+                      {selectedLead.krs ? <> • KRS: <strong className="text-white font-mono">{selectedLead.krs}</strong></> : null}
+                    </span>
+                    <span className="text-[10px] text-[#64748B]">
+                      Źródło: {selectedLead.scoreBreakdown?.registrySource === "krs_api" ? "api-krs.ms.gov.pl" : "wl-api.mf.gov.pl (MF)"}
+                    </span>
                   </div>
                 </div>
 
