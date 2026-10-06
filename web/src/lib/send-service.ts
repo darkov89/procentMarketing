@@ -2,10 +2,11 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import nodemailer from "nodemailer";
-import { db, leads, messages, suppression, appSettings, leadEvents, campaigns, campaignLeads } from "@/lib/db";
+import { db, leads, messages, suppression, appSettings, leadEvents, campaigns, campaignLeads, emailAccounts } from "@/lib/db";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { isWithinSendingWindow } from "./polish-calendar";
 import { transitionLead, LeadStatus } from "./state-machine";
+import { getSecret } from "./secrets";
 
 export interface SendResult {
   success: boolean;
@@ -117,6 +118,49 @@ export async function getLiveMessagesSentTodayCount(): Promise<number> {
 }
 
 /**
+ * Count sent messages today for a specific email account
+ */
+export async function getAccountMessagesSentTodayCount(tenantId: number): Promise<number> {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.tenantId, tenantId),
+        eq(messages.direction, "outbound"),
+        eq(messages.status, "sent"),
+        gte(messages.sentAt, startOfDay)
+      )
+    );
+
+  return Number(row?.count || 0);
+}
+
+/**
+ * Count sent messages in the past 60 minutes for a specific tenant
+ */
+export async function getAccountMessagesSentPastHourCount(tenantId: number): Promise<number> {
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.tenantId, tenantId),
+        eq(messages.direction, "outbound"),
+        eq(messages.status, "sent"),
+        gte(messages.sentAt, oneHourAgo)
+      )
+    );
+
+  return Number(row?.count || 0);
+}
+
+/**
  * INVARIANT 2: ONE EMAIL SEND PATH.
  * Every production email must go through sendMessage(messageId).
  * Executes checks strictly in order:
@@ -197,6 +241,7 @@ export async function sendMessage(
       campaignStatus: campaigns.status,
       campaignKillSwitch: campaigns.killSwitch,
       campaignTestMode: campaigns.testMode,
+      emailAccountId: campaigns.emailAccountId,
     })
     .from(campaignLeads)
     .innerJoin(campaigns, eq(campaignLeads.campaignId, campaigns.id))
@@ -416,24 +461,74 @@ export async function sendMessage(
   }
 
   // -------------------------------------------------------------
-  // 11 & 12. DAILY LIMIT & RAMP LIMIT
+  // 11 & 12. DAILY & HOURLY LIMITS (Tenant, Global & Mailbox Account)
   // -------------------------------------------------------------
+  // Load email account if campaign specifies one, or fall back to tenant default account
+  let configuredAccount: typeof emailAccounts.$inferSelect | null = null;
+  if (campaignLeadRecord?.emailAccountId) {
+    const [acc] = await db
+      .select()
+      .from(emailAccounts)
+      .where(and(eq(emailAccounts.id, campaignLeadRecord.emailAccountId), eq(emailAccounts.tenantId, lead.tenantId)))
+      .limit(1);
+    configuredAccount = acc || null;
+  }
+
+  if (!configuredAccount) {
+    const [firstAcc] = await db
+      .select()
+      .from(emailAccounts)
+      .where(eq(emailAccounts.tenantId, lead.tenantId))
+      .limit(1);
+    configuredAccount = firstAcc || null;
+  }
+
   if (isTrulyLive) {
     const liveSentToday = await getLiveMessagesSentTodayCount();
     const settingsVal = liveSettingsRow?.value as Record<string, unknown> | undefined;
-    const configuredLimit = Math.min(
+    const configuredGlobalLimit = Math.min(
       typeof settingsVal?.daily_limit === "number" ? settingsVal.daily_limit : DEFAULT_DAILY_LIMIT,
       MAX_DAILY_LIMIT
     );
 
-    if (liveSentToday >= configuredLimit) {
+    if (liveSentToday >= configuredGlobalLimit) {
       return {
         success: false,
         messageId,
         smtpMessageId: null,
         status: "blocked",
-        reason: `Dzienny limit wysyłek został wyczerpany (${liveSentToday}/${configuredLimit}).`,
+        reason: `Dzienny limit wysyłek został wyczerpany (${liveSentToday}/${configuredGlobalLimit}).`,
         isTestMode: false,
+        recipient: realRecipient,
+      };
+    }
+  }
+
+  // Check account-specific daily & hourly limits if email account exists (enforced for deliverability safety)
+  if (configuredAccount) {
+    const accountSentToday = await getAccountMessagesSentTodayCount(lead.tenantId);
+    if (accountSentToday >= configuredAccount.dailyLimit) {
+      return {
+        success: false,
+        messageId,
+        smtpMessageId: null,
+        status: "blocked",
+        reason: `Dzienny limit skrzynki '${configuredAccount.label}' został wyczerpany (${accountSentToday}/${configuredAccount.dailyLimit}).`,
+        isTestMode: !isTrulyLive,
+        recipient: realRecipient,
+      };
+    }
+
+    // Check account-specific hourly limit
+    const accountSentPastHour = await getAccountMessagesSentPastHourCount(lead.tenantId);
+    if (accountSentPastHour >= configuredAccount.hourlyLimit) {
+      return {
+        success: false,
+        messageId,
+        smtpMessageId: null,
+        status: "blocked",
+        reason: `Godzinowy limit skrzynki '${configuredAccount.label}' został wyczerpany (${accountSentPastHour}/${configuredAccount.hourlyLimit}/h).`,
+        isTestMode: !isTrulyLive,
         recipient: realRecipient,
       };
     }
@@ -472,12 +567,26 @@ export async function sendMessage(
   // -------------------------------------------------------------
   // 14. SMTP SEND
   // -------------------------------------------------------------
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASSWORD;
-  const fromEmail = process.env.SMTP_FROM_EMAIL || "kontakt@procentmarketing.pl";
-  const fromName = process.env.SMTP_FROM_NAME || "Procent Marketing";
+  // Resolve credentials: from email_account (with encrypted secret) or fallback to env
+  const smtpHost = configuredAccount?.smtpHost || process.env.SMTP_HOST;
+  const smtpPort = configuredAccount?.smtpPort || parseInt(process.env.SMTP_PORT || "587", 10);
+  const smtpUser = configuredAccount?.smtpUser || process.env.SMTP_USER;
+  const smtpSecure = configuredAccount ? configuredAccount.smtpSecure ?? (smtpPort === 465) : smtpPort === 465;
+  const fromEmail = configuredAccount?.fromEmail || process.env.SMTP_FROM_EMAIL || "kontakt@procentmarketing.pl";
+  const fromName = configuredAccount?.fromName || process.env.SMTP_FROM_NAME || "Procent Marketing";
+  const replyTo = configuredAccount?.replyTo || fromEmail;
+
+  // Retrieve password from encrypted tenant_secrets (R9)
+  let smtpPass: string | null = null;
+  if (configuredAccount) {
+    smtpPass =
+      (await getSecret(lead.tenantId, `smtp_password_account_${configuredAccount.id}`)) ||
+      (await getSecret(lead.tenantId, "smtp_password")) ||
+      process.env.SMTP_PASSWORD ||
+      null;
+  } else {
+    smtpPass = (await getSecret(lead.tenantId, "smtp_password")) || process.env.SMTP_PASSWORD || null;
+  }
 
   let smtpMessageId: string | null = null;
   let sendError: Error | null = null;
@@ -487,7 +596,7 @@ export async function sendMessage(
       const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: smtpPort,
-        secure: smtpPort === 465,
+        secure: smtpSecure,
         auth: {
           user: smtpUser,
           pass: smtpPass,
@@ -499,13 +608,21 @@ export async function sendMessage(
         ? msg.subject || "Oferta współpracy"
         : `[TEST SANDBOX] ${msg.subject || "Oferta"}`;
 
+      // Append standard opt-out & legal footer with List-Unsubscribe header
+      const unsubscribeUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://procentmarketing.pl"}/api/unsubscribe?leadId=${lead.id}&token=${crypto.createHash("sha256").update(`optout:${lead.id}:${lead.tenantId}`).digest("hex").slice(0, 16)}`;
+
       const info = await transporter.sendMail({
         from: `"${fromName}" <${fromEmail}>`,
         to: targetRecipient,
+        replyTo: replyTo || undefined,
         subject,
         text: msg.bodyText || "",
         html: msg.bodyHtml || undefined,
         inReplyTo: msg.inReplyTo || undefined,
+        headers: {
+          "List-Unsubscribe": `<${unsubscribeUrl}>, <mailto:${replyTo}?subject=unsubscribe>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
       });
 
       smtpMessageId = info.messageId || `smtp-${Date.now()}`;

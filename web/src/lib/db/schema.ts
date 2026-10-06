@@ -520,6 +520,35 @@ export const playbookVersions = pgTable("playbook_versions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const emailAccounts = pgTable("email_accounts", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  label: varchar("label", { length: 255 }).notNull(),
+  fromName: varchar("from_name", { length: 255 }).notNull(),
+  fromEmail: varchar("from_email", { length: 255 }).notNull(),
+  replyTo: varchar("reply_to", { length: 255 }),
+  signature: text("signature"),
+  smtpHost: varchar("smtp_host", { length: 255 }),
+  smtpPort: integer("smtp_port").default(587),
+  smtpUser: varchar("smtp_user", { length: 255 }),
+  smtpSecure: boolean("smtp_secure").default(false),
+  imapHost: varchar("imap_host", { length: 255 }),
+  imapPort: integer("imap_port").default(993),
+  imapUser: varchar("imap_user", { length: 255 }),
+  imapTls: boolean("imap_tls").default(true),
+  dailyLimit: integer("daily_limit").default(30).notNull(),
+  hourlyLimit: integer("hourly_limit").default(10).notNull(),
+  minGapSeconds: integer("min_gap_seconds").default(60).notNull(),
+  warmupPlan: jsonb("warmup_plan"),
+  status: varchar("status", { length: 50 }).default("ok").notNull(), // ok, degraded, error
+  lastCheckAt: timestamp("last_check_at", { withTimezone: true }),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 export const campaigns = pgTable("campaigns", {
   id: serial("id").primaryKey(),
   tenantId: integer("tenant_id")
@@ -531,6 +560,7 @@ export const campaigns = pgTable("campaigns", {
     .references(() => playbookVersions.id, { onDelete: "restrict" })
     .notNull(),
   ownerUserId: integer("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+  emailAccountId: integer("email_account_id").references(() => emailAccounts.id, { onDelete: "set null" }),
   testMode: boolean("test_mode").default(true).notNull(),
   killSwitch: boolean("kill_switch").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
