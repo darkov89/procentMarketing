@@ -125,6 +125,11 @@ export const contacts = pgTable("contacts", {
   source: varchar("source", { length: 50 }),
   confidence: doublePrecision("confidence"),
   isPrimary: boolean("is_primary").default(false),
+  kind: varchar("kind", { length: 20 }).default("email").notNull(), // email, phone, form
+  roleLabel: varchar("role_label", { length: 100 }),
+  sourceUrl: varchar("source_url", { length: 512 }),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }),
+  verificationStatus: varchar("verification_status", { length: 30 }).default("unverified").notNull(), // verified, unverified, invalid
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -699,6 +704,78 @@ export const customFieldValues = pgTable("custom_field_values", {
   source: varchar("source", { length: 100 }),
   updatedById: integer("updated_by_id").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const searchTemplates = pgTable("search_templates", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  criteria: jsonb("criteria").notNull(), // industry, keywords, location, radiusKm, etc.
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const searchRuns = pgTable("search_runs", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  campaignId: integer("campaign_id")
+    .references(() => campaigns.id, { onDelete: "cascade" }),
+  templateId: integer("template_id")
+    .references(() => searchTemplates.id, { onDelete: "set null" }),
+  status: varchar("status", { length: 50 }).default("draft").notNull(), // draft, running, paused, completed, failed, budget_exceeded
+  estimatedRequests: integer("estimated_requests"),
+  usedRequests: integer("used_requests").default(0).notNull(),
+  foundCount: integer("found_count").default(0).notNull(),
+  newCount: integer("new_count").default(0).notNull(),
+  duplicatesCount: integer("duplicates_count").default(0).notNull(),
+  error: text("error"),
+  startedAt: timestamp("started_at", { withTimezone: true }),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const searchRunCells = pgTable("search_run_cells", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  runId: integer("run_id")
+    .references(() => searchRuns.id, { onDelete: "cascade" })
+    .notNull(),
+  cellKey: varchar("cell_key", { length: 64 }).notNull(),
+  bbox: jsonb("bbox").notNull(), // { minLat, maxLat, minLng, maxLng } or { center: { lat, lng }, radiusMeters }
+  status: varchar("status", { length: 50 }).default("pending").notNull(), // pending, processing, completed, saturated, failed
+  pagesFetched: integer("pages_fetched").default(0).notNull(),
+  resultsCount: integer("results_count").default(0).notNull(),
+  saturated: boolean("saturated").default(false).notNull(),
+  error: text("error"),
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const leadFieldValues = pgTable("lead_field_values", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  leadId: integer("lead_id")
+    .references(() => leads.id, { onDelete: "cascade" })
+    .notNull(),
+  field: varchar("field", { length: 64 }).notNull(),
+  value: jsonb("value").notNull(),
+  source: varchar("source", { length: 100 }).notNull(),
+  sourceUrl: varchar("source_url", { length: 512 }),
+  retrievedAt: timestamp("retrieved_at", { withTimezone: true }).defaultNow().notNull(),
+  confidence: doublePrecision("confidence").default(1.0).notNull(),
+  verifiedBy: varchar("verified_by", { length: 100 }),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  isManual: boolean("is_manual").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Relations

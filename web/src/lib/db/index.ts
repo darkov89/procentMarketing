@@ -37,11 +37,19 @@ export async function withTenant<T>(
   }
 
   return await db.transaction(async (tx) => {
-    // Switch to application role without BYPASSRLS
-    await tx.execute(sql`SET ROLE app_rw`);
-    // Set transaction-local session variable (is_local = true)
-    await tx.execute(sql`SELECT set_config('app.tenant_id', ${String(tenantId)}, true)`);
-    return await fn(tx);
+    try {
+      // Switch to application role without BYPASSRLS
+      await tx.execute(sql`SET ROLE app_rw`);
+      // Set transaction-local session variable (is_local = true)
+      await tx.execute(sql`SELECT set_config('app.tenant_id', ${String(tenantId)}, true)`);
+      const result = await fn(tx);
+      await tx.execute(sql`RESET ROLE`);
+      await tx.execute(sql`RESET app.tenant_id`);
+      return result;
+    } catch (err) {
+      // Transaction is aborted in Postgres; roll back / end transaction will clear transaction-local settings
+      throw err;
+    }
   });
 }
 

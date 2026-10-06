@@ -22,6 +22,13 @@
       "when": 1791280714691,
       "tag": "0002_supreme_silver_centurion",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791281756200,
+      "tag": "0003_vengeful_black_bolt",
+      "breakpoints": true
     }
   ]
 }
