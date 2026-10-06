@@ -778,6 +778,42 @@ export const leadFieldValues = pgTable("lead_field_values", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const tenantProfiles = pgTable("tenant_profiles", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .unique()
+    .notNull(),
+  companyDescription: text("company_description").notNull(),
+  coreServices: jsonb("core_services").notNull(), // array of services/packages
+  uniqueSellingPoints: text("unique_selling_points").array().default([]).notNull(),
+  targetAudience: text("target_audience"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const pricingConfigs = pgTable(
+  "pricing_configs",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .references(() => tenants.id, { onDelete: "cascade" })
+      .notNull(),
+    packageKey: varchar("package_key", { length: 64 }).notNull(),
+    packageName: varchar("package_name", { length: 255 }).notNull(),
+    description: text("description"),
+    basePriceMinor: bigint("base_price_minor", { mode: "number" }).notNull(),
+    currency: varchar("currency", { length: 3 }).default("PLN").notNull(),
+    billingPeriod: varchar("billing_period", { length: 32 }).default("monthly").notNull(),
+    active: boolean("active").default(true).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("pricing_configs_tenant_id_package_key_key").on(table.tenantId, table.packageKey),
+  ]
+);
+
 // Relations
 export const leadsRelations = relations(leads, ({ one, many }) => ({
   tenant: one(tenants, {
