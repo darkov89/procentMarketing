@@ -2,7 +2,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import nodemailer from "nodemailer";
-import { db, leads, messages, suppression, appSettings, leadEvents } from "@/lib/db";
+import { db, leads, messages, suppression, appSettings, leadEvents, campaigns, campaignLeads } from "@/lib/db";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { isWithinSendingWindow } from "./polish-calendar";
 import { transitionLead, LeadStatus } from "./state-machine";
@@ -190,13 +190,46 @@ export async function sendMessage(
     dbKillSetting && (dbKillSetting.value as Record<string, unknown>)?.active === true
   );
 
-  if (fileKillSwitchActive || dbKillSwitchActive) {
+  // Check campaign kill switch and status if lead belongs to a campaign
+  const [campaignLeadRecord] = await db
+    .select({
+      campaignId: campaignLeads.campaignId,
+      campaignStatus: campaigns.status,
+      campaignKillSwitch: campaigns.killSwitch,
+      campaignTestMode: campaigns.testMode,
+    })
+    .from(campaignLeads)
+    .innerJoin(campaigns, eq(campaignLeads.campaignId, campaigns.id))
+    .where(and(eq(campaignLeads.leadId, lead.id), eq(campaignLeads.tenantId, lead.tenantId)))
+    .limit(1);
+
+  const campaignKillSwitchActive = campaignLeadRecord?.campaignKillSwitch === true;
+
+  if (fileKillSwitchActive || dbKillSwitchActive || campaignKillSwitchActive) {
+    const source = campaignKillSwitchActive
+      ? "kampania"
+      : fileKillSwitchActive
+      ? "plik STOP"
+      : "baza danych";
     return {
       success: false,
       messageId,
       smtpMessageId: null,
       status: "blocked",
-      reason: `Wysyłka wstrzymana przez Kill Switch (${fileKillSwitchActive ? "plik STOP" : "baza danych"}).`,
+      reason: `Wysyłka wstrzymana przez Kill Switch (${source}).`,
+      isTestMode: true,
+      recipient: lead.emailPrimary || "",
+    };
+  }
+
+  // If lead is in campaign and campaign is not active, block send
+  if (campaignLeadRecord && campaignLeadRecord.campaignStatus !== "active") {
+    return {
+      success: false,
+      messageId,
+      smtpMessageId: null,
+      status: "blocked",
+      reason: `Kampania #${campaignLeadRecord.campaignId} nie jest aktywna (status: ${campaignLeadRecord.campaignStatus}).`,
       isTestMode: true,
       recipient: lead.emailPrimary || "",
     };
@@ -217,8 +250,9 @@ export async function sendMessage(
     liveSettingsRow && (liveSettingsRow.value as Record<string, unknown>)?.live_enabled === true
   );
 
-  // The send is truly LIVE only if BOTH env AND database setting agree
-  const isTrulyLive = envLive && settingsLiveEnabled;
+  // The send is truly LIVE only if BOTH env AND database setting agree AND campaign is not in testMode
+  const campaignAllowsLive = campaignLeadRecord ? campaignLeadRecord.campaignTestMode === false : true;
+  const isTrulyLive = envLive && settingsLiveEnabled && campaignAllowsLive;
 
   // Determine target recipient (test redirection if not live)
   const realRecipient = lead.emailPrimary?.trim().toLowerCase();

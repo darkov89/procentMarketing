@@ -2,8 +2,11 @@ import {
   boolean,
   doublePrecision,
   integer,
+  smallint,
   bigint,
   json,
+  jsonb,
+  date,
   pgTable,
   serial,
   text,
@@ -485,6 +488,218 @@ export const usageCounters = pgTable(
     ),
   ]
 );
+
+// ==========================================
+// FAZA 2: PLAYBOOKI I KAMPANIE (D1, D2)
+// ==========================================
+
+export const playbooks = pgTable("playbooks", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  presetKey: varchar("preset_key", { length: 64 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const playbookVersions = pgTable("playbook_versions", {
+  id: serial("id").primaryKey(),
+  playbookId: integer("playbook_id")
+    .references(() => playbooks.id, { onDelete: "cascade" })
+    .notNull(),
+  version: integer("version").notNull(),
+  definition: jsonb("definition").notNull(), // PlaybookDefinition (Zod)
+  createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const campaigns = pgTable("campaigns", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  status: varchar("status", { length: 50 }).default("draft").notNull(), // draft, active, paused, archived
+  playbookVersionId: integer("playbook_version_id")
+    .references(() => playbookVersions.id, { onDelete: "restrict" })
+    .notNull(),
+  ownerUserId: integer("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+  testMode: boolean("test_mode").default(true).notNull(),
+  killSwitch: boolean("kill_switch").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const batches = pgTable("batches", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  campaignId: integer("campaign_id")
+    .references(() => campaigns.id, { onDelete: "cascade" })
+    .notNull(),
+  size: integer("size").notNull(),
+  status: varchar("status", { length: 50 }).default("draft").notNull(), // draft, approved, rejected
+  approvedById: integer("approved_by_id").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const campaignLeads = pgTable(
+  "campaign_leads",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .references(() => tenants.id, { onDelete: "cascade" })
+      .notNull(),
+    campaignId: integer("campaign_id")
+      .references(() => campaigns.id, { onDelete: "cascade" })
+      .notNull(),
+    leadId: integer("lead_id")
+      .references(() => leads.id, { onDelete: "cascade" })
+      .notNull(),
+    state: varchar("state", { length: 50 }).default("new").notNull(),
+    priority: smallint("priority"),
+    ownerUserId: integer("owner_user_id").references(() => users.id, { onDelete: "set null" }),
+    batchId: integer("batch_id").references(() => batches.id, { onDelete: "set null" }),
+    chosenContactId: integer("chosen_contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    fitReason: text("fit_reason"),
+    requiresManualReview: boolean("requires_manual_review").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("campaign_leads_campaign_id_lead_id_key").on(table.campaignId, table.leadId),
+  ]
+);
+
+export const channelPermissions = pgTable("channel_permissions", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  campaignLeadId: integer("campaign_lead_id")
+    .references(() => campaignLeads.id, { onDelete: "cascade" })
+    .notNull(),
+  contactId: integer("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+  channel: varchar("channel", { length: 20 }).notNull(), // email, phone
+  status: varchar("status", { length: 20 }).default("to_check").notNull(), // yes, no, to_check
+  rationale: text("rationale"),
+  evidenceUrl: varchar("evidence_url", { length: 512 }),
+  evidenceNote: text("evidence_note"),
+  approvedById: integer("approved_by_id").references(() => users.id, { onDelete: "set null" }),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const blocks = pgTable(
+  "blocks",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .references(() => tenants.id, { onDelete: "cascade" })
+      .notNull(),
+    kind: varchar("kind", { length: 20 }).notNull(), // email, domain, phone, nip
+    hash: varchar("hash", { length: 64 }).notNull(),
+    reason: varchar("reason", { length: 50 }).notNull(), // refusal, unsubscribe, bounce, prior_contact, manual
+    source: varchar("source", { length: 100 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("blocks_tenant_id_kind_hash_key").on(table.tenantId, table.kind, table.hash),
+  ]
+);
+
+export const sequenceRuns = pgTable("sequence_runs", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  campaignLeadId: integer("campaign_lead_id")
+    .references(() => campaignLeads.id, { onDelete: "cascade" })
+    .notNull(),
+  stepIndex: integer("step_index").default(0).notNull(),
+  status: varchar("status", { length: 50 }).default("active").notNull(), // active, paused, stopped, done
+  nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+  stopReason: varchar("stop_reason", { length: 100 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const tasks = pgTable("tasks", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  campaignLeadId: integer("campaign_lead_id")
+    .references(() => campaignLeads.id, { onDelete: "cascade" })
+    .notNull(),
+  type: varchar("type", { length: 50 }).notNull(), // phone_call, verify_channel, manual_review
+  assigneeUserId: integer("assignee_user_id").references(() => users.id, { onDelete: "set null" }),
+  dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+  status: varchar("status", { length: 50 }).default("open").notNull(), // open, done, snoozed, cancelled, blocked
+  result: varchar("result", { length: 100 }),
+  nextStep: varchar("next_step", { length: 100 }),
+  blockedReason: text("blocked_reason"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const outcomes = pgTable("outcomes", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  campaignLeadId: integer("campaign_lead_id")
+    .references(() => campaignLeads.id, { onDelete: "cascade" })
+    .notNull(),
+  pledgedMinor: bigint("pledged_minor", { mode: "number" }),
+  currency: varchar("currency", { length: 3 }).default("PLN").notNull(),
+  expectedPaymentDate: date("expected_payment_date"),
+  paidMinor: bigint("paid_minor", { mode: "number" }),
+  paymentConfirmedById: integer("payment_confirmed_by_id").references(() => users.id, { onDelete: "set null" }),
+  paymentConfirmedAt: timestamp("payment_confirmed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const customFieldDefs = pgTable(
+  "custom_field_defs",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .references(() => tenants.id, { onDelete: "cascade" })
+      .notNull(),
+    campaignId: integer("campaign_id")
+      .references(() => campaigns.id, { onDelete: "cascade" })
+      .notNull(),
+    key: varchar("key", { length: 64 }).notNull(),
+    label: varchar("label", { length: 255 }).notNull(),
+    type: varchar("type", { length: 50 }).notNull(), // text, number, date, enum
+    options: jsonb("options"),
+    required: boolean("required").default(false).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("custom_field_defs_campaign_id_key_key").on(table.campaignId, table.key),
+  ]
+);
+
+export const customFieldValues = pgTable("custom_field_values", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  campaignLeadId: integer("campaign_lead_id")
+    .references(() => campaignLeads.id, { onDelete: "cascade" })
+    .notNull(),
+  key: varchar("key", { length: 64 }).notNull(),
+  value: jsonb("value"),
+  source: varchar("source", { length: 100 }),
+  updatedById: integer("updated_by_id").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 // Relations
 export const leadsRelations = relations(leads, ({ one, many }) => ({

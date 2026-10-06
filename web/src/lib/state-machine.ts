@@ -1,5 +1,5 @@
-import { db, leads, leadEvents } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { db, leads, leadEvents, campaigns, campaignLeads, playbookVersions } from "@/lib/db";
+import { eq, and } from "drizzle-orm";
 
 export type LeadStatus =
   | "new"
@@ -217,6 +217,16 @@ export async function transitionLead(params: TransitionParams) {
   // 4. Update lead and append immutable audit log to lead_events
   await db.update(leads).set(updateData).where(eq(leads.id, leadId));
 
+  // Sync state to default campaign_leads if present (Faza 2 adapter)
+  try {
+    await db
+      .update(campaignLeads)
+      .set({ state: toStatus, updatedAt: new Date() })
+      .where(and(eq(campaignLeads.leadId, leadId), eq(campaignLeads.tenantId, currentLead.tenantId)));
+  } catch (syncErr) {
+    console.warn("Could not sync campaignLeads state:", syncErr);
+  }
+
   await db.insert(leadEvents).values({
     tenantId: currentLead.tenantId,
     leadId,
@@ -239,3 +249,102 @@ export async function transitionLead(params: TransitionParams) {
     currentStatus: toStatus,
   };
 }
+
+export interface CampaignLeadTransitionParams {
+  campaignLeadId: number;
+  toState: string;
+  reason?: string | null;
+  actor?: string;
+  metadata?: Record<string, unknown> | null;
+}
+
+/**
+ * INVARIANT 3 & FAZA 2: Transition state of campaign_lead based on campaign playbook definition.
+ */
+export async function transitionCampaignLead({
+  campaignLeadId,
+  toState,
+  reason = null,
+  actor = "system",
+  metadata = null,
+}: CampaignLeadTransitionParams): Promise<{
+  success: boolean;
+  campaignLeadId: number;
+  fromState: string;
+  toState: string;
+}> {
+  const [record] = await db
+    .select({
+      id: campaignLeads.id,
+      tenantId: campaignLeads.tenantId,
+      campaignId: campaignLeads.campaignId,
+      leadId: campaignLeads.leadId,
+      fromState: campaignLeads.state,
+      definition: playbookVersions.definition,
+    })
+    .from(campaignLeads)
+    .innerJoin(campaigns, eq(campaignLeads.campaignId, campaigns.id))
+    .innerJoin(playbookVersions, eq(campaigns.playbookVersionId, playbookVersions.id))
+    .where(eq(campaignLeads.id, campaignLeadId));
+
+  if (!record) {
+    throw new Error(`CampaignLead #${campaignLeadId} nie został odnaleziony.`);
+  }
+
+  const { fromState, definition } = record;
+  if (fromState === toState) {
+    return { success: true, campaignLeadId, fromState, toState };
+  }
+
+  // Validate allowed transition against playbook definition
+  const pbDef = definition as {
+    states?: string[];
+    transitions?: Array<{ from: string; to: string }>;
+  };
+
+  const allowedTransitions = pbDef.transitions || [];
+  const isAllowed = allowedTransitions.some((t) => t.from === fromState && t.to === toState);
+
+  // Core terminal states are always allowable destinations
+  const isTerminalCore = ["blocked", "unsubscribed", "bounced"].includes(toState);
+
+  if (!isAllowed && !isTerminalCore) {
+    throw new IllegalStateTransitionError(
+      record.leadId,
+      fromState as LeadStatus,
+      toState as LeadStatus,
+      `Niedozwolone przejście z '${fromState}' do '${toState}' w playbooku kampanii.`
+    );
+  }
+
+  // Update campaign_lead
+  await db
+    .update(campaignLeads)
+    .set({ state: toState, updatedAt: new Date() })
+    .where(eq(campaignLeads.id, campaignLeadId));
+
+  // Sync to leads table
+  await db
+    .update(leads)
+    .set({ status: toState, updatedAt: new Date() })
+    .where(eq(leads.id, record.leadId));
+
+  // Immutable audit log
+  await db.insert(leadEvents).values({
+    tenantId: record.tenantId,
+    leadId: record.leadId,
+    fromStatus: fromState,
+    toStatus: toState,
+    reason,
+    actor,
+    metadata: {
+      ...metadata,
+      campaignId: record.campaignId,
+      campaignLeadId,
+    },
+    createdAt: new Date(),
+  });
+
+  return { success: true, campaignLeadId, fromState, toState };
+}
+
