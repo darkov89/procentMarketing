@@ -389,23 +389,34 @@ export const leadDeals = pgTable("lead_deals", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-export const jobs = pgTable("jobs", {
-  id: serial("id").primaryKey(),
-  tenantId: integer("tenant_id")
-    .references(() => tenants.id, { onDelete: "cascade" })
-    .notNull(),
-  type: varchar("type", { length: 100 }).notNull(),
-  payload: json("payload"),
-  status: varchar("status", { length: 50 }).default("pending").notNull(),
-  attempts: integer("attempts").default(0).notNull(),
-  maxAttempts: integer("max_attempts").default(3).notNull(),
-  lastError: text("last_error"),
-  lockedAt: timestamp("locked_at", { withTimezone: true }),
-  lockedBy: varchar("locked_by", { length: 100 }),
-  runAt: timestamp("run_at", { withTimezone: true }).defaultNow().notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .references(() => tenants.id, { onDelete: "cascade" })
+      .notNull(),
+    campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+    type: varchar("type", { length: 100 }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 128 }),
+    priority: smallint("priority").default(50).notNull(),
+    payload: json("payload"),
+    result: jsonb("result"),
+    status: varchar("status", { length: 50 }).default("pending").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    maxAttempts: integer("max_attempts").default(3).notNull(),
+    lastError: text("last_error"),
+    heartbeatAt: timestamp("heartbeat_at", { withTimezone: true }),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    lockedBy: varchar("locked_by", { length: 100 }),
+    runAt: timestamp("run_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("jobs_tenant_id_idempotency_key_unique").on(table.tenantId, table.idempotencyKey),
+  ]
+);
 
 export const evidence = pgTable("evidence", {
   id: serial("id").primaryKey(),
