@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { can, SafeUser, AuthorizationError, requireCapability } from "@/lib/auth";
+import { can, SafeUser } from "@/lib/auth";
 
 describe("Granular Permissions & Capabilities (D6, Step 1.4)", () => {
   it("grants full capabilities to owner role (wildcard '*')", () => {

@@ -58,7 +58,7 @@ describe("Tenant Quotas & Usage Limits (Step 1.5)", () => {
       async () => {
         await consume(testTenantId, testMetric, 1, testPeriod);
       },
-      (err: any) => {
+      (err: unknown) => {
         assert.ok(err instanceof LimitExceededError);
         assert.equal(err.metric, testMetric);
         assert.equal(err.current, 10);

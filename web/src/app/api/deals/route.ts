@@ -103,25 +103,20 @@ export async function POST(req: Request) {
         .values({
           tenantId,
           leadId,
-          dealName,
           status,
-          declaredAmount: declaredAmount ? BigInt(declaredAmount) : null,
-          paidAmount: BigInt(paidAmount),
+          declaredAmount: declaredAmount ?? 0,
+          paidAmount: paidAmount,
           currency,
-          expectedPaymentDate: expectedPaymentDate ? new Date(expectedPaymentDate) : null,
+          expectedPaymentAt: expectedPaymentDate ? new Date(expectedPaymentDate) : null,
           confirmedByUserId: authedUser.id,
-          confirmedAt: new Date(),
+          paidConfirmedAt: new Date(),
           notes,
         })
         .returning();
 
       return NextResponse.json({
         success: true,
-        deal: {
-          ...newDeal,
-          declaredAmount: newDeal.declaredAmount ? Number(newDeal.declaredAmount) : null,
-          paidAmount: newDeal.paidAmount ? Number(newDeal.paidAmount) : null,
-        },
+        deal: newDeal,
       });
     }
 
@@ -130,23 +125,18 @@ export async function POST(req: Request) {
       .values({
         tenantId,
         leadId,
-        dealName,
         status,
-        declaredAmount: declaredAmount ? BigInt(declaredAmount) : null,
-        paidAmount: null,
+        declaredAmount: declaredAmount ?? 0,
+        paidAmount: 0,
         currency,
-        expectedPaymentDate: expectedPaymentDate ? new Date(expectedPaymentDate) : null,
+        expectedPaymentAt: expectedPaymentDate ? new Date(expectedPaymentDate) : null,
         notes,
       })
       .returning();
 
     return NextResponse.json({
       success: true,
-      deal: {
-        ...newDeal,
-        declaredAmount: newDeal.declaredAmount ? Number(newDeal.declaredAmount) : null,
-        paidAmount: null,
-      },
+      deal: newDeal,
     });
   } catch (err: any) {
     if (err?.name === "AuthenticationError") {
@@ -195,20 +185,20 @@ export async function PATCH(req: Request) {
       updatedAt: new Date(),
     };
 
-    if (declaredAmount !== undefined) updates.declaredAmount = BigInt(declaredAmount);
+    if (declaredAmount !== undefined) updates.declaredAmount = declaredAmount;
     if (currency !== undefined) updates.currency = currency;
     if (expectedPaymentDate !== undefined) {
-      updates.expectedPaymentDate = expectedPaymentDate ? new Date(expectedPaymentDate) : null;
+      updates.expectedPaymentAt = expectedPaymentDate ? new Date(expectedPaymentDate) : null;
     }
     if (notes !== undefined) updates.notes = notes;
 
     // STEP 1.4a: Confirm payment requires granular capability 'confirm_payment'
     if (paidAmount !== undefined || status === "paid") {
       const { user: confirmedUser } = await requireCapability("confirm_payment");
-      if (paidAmount !== undefined) updates.paidAmount = BigInt(paidAmount);
+      if (paidAmount !== undefined) updates.paidAmount = paidAmount;
       if (status !== undefined) updates.status = status;
       updates.confirmedByUserId = confirmedUser.id;
-      updates.confirmedAt = new Date();
+      updates.paidConfirmedAt = new Date();
     } else if (status !== undefined) {
       updates.status = status;
     }
@@ -221,11 +211,7 @@ export async function PATCH(req: Request) {
 
     return NextResponse.json({
       success: true,
-      deal: {
-        ...updated,
-        declaredAmount: updated.declaredAmount ? Number(updated.declaredAmount) : null,
-        paidAmount: updated.paidAmount ? Number(updated.paidAmount) : null,
-      },
+      deal: updated,
     });
   } catch (err: any) {
     if (err?.name === "AuthenticationError") {
