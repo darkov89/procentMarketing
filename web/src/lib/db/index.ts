@@ -1,5 +1,6 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import ws from "ws";
 import * as schema from "./schema";
 
 const connectionString = process.env.DATABASE_URL;
@@ -8,9 +9,55 @@ if (!connectionString) {
   throw new Error("DATABASE_URL environment variable is not defined.");
 }
 
-// Serverless HTTP client for Neon (lightning fast, zero pooling latency)
-const sql = neon(connectionString);
+// In Node.js environments (CLI, test, serverless runtime without global WebSocket), configure ws
+if (typeof WebSocket === "undefined" && typeof globalThis.WebSocket === "undefined") {
+  neonConfig.webSocketConstructor = ws;
+}
 
-export const db = drizzle(sql, { schema });
+import { sql } from "drizzle-orm";
+
+export const pool = new Pool({ connectionString });
+export const db = drizzle(pool, { schema });
 export * from "./schema";
+
+export type DbClient = typeof db;
+export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Executes an operation inside a PostgreSQL transaction scoped to a specific tenant.
+ * Sets the non-bypassrls role 'app_rw' and sets 'app.tenant_id' in transaction-local config.
+ * Guarantees Row-Level Security enforcement at the database level.
+ */
+export async function withTenant<T>(
+  tenantId: number,
+  fn: (tx: DbTransaction) => Promise<T>
+): Promise<T> {
+  if (!tenantId || typeof tenantId !== "number" || tenantId <= 0) {
+    throw new Error(`Invalid tenantId provided to withTenant: ${tenantId}`);
+  }
+
+  return await db.transaction(async (tx) => {
+    // Switch to application role without BYPASSRLS
+    await tx.execute(sql`SET ROLE app_rw`);
+    // Set transaction-local session variable (is_local = true)
+    await tx.execute(sql`SELECT set_config('app.tenant_id', ${String(tenantId)}, true)`);
+    return await fn(tx);
+  });
+}
+
+/**
+ * Executes an operation inside a system/administrative transaction (bypasses tenant RLS).
+ * Used strictly for background jobs, worker claiming, and tenant discovery.
+ */
+export async function withSystemContext<T>(
+  fn: (tx: DbTransaction) => Promise<T>
+): Promise<T> {
+  return await db.transaction(async (tx) => {
+    // Reset to neondb_owner super/admin role
+    await tx.execute(sql`RESET ROLE`);
+    return await fn(tx);
+  });
+}
+
+
 
