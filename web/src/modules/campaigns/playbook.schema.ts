@@ -21,6 +21,9 @@ export const fitRubricSchema = z.object({
   noEvidenceBehavior: z.enum(["manual_review", "reject", "pass"]).default("manual_review"),
 });
 
+export type FitRubricLevelDefinition = z.infer<typeof fitRubricLevelSchema>;
+export type FitRubricDefinition = z.infer<typeof fitRubricSchema>;
+
 export const contactPathSchema = z.object({
   order: z.array(z.string()).default([
     "csr_department",

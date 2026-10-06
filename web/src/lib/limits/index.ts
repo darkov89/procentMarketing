@@ -1,4 +1,4 @@
-import { db, tenantLimits, usageCounters } from "@/lib/db";
+import { tenantLimits, usageCounters, withTenant } from "@/lib/db";
 import { and, eq, sql } from "drizzle-orm";
 
 export class LimitExceededError extends Error {
@@ -36,11 +36,13 @@ export async function getTenantLimit(
   tenantId: number,
   metric: SupportedMetric | string
 ): Promise<number | null> {
-  const rows = await db
-    .select({ limitValue: tenantLimits.limitValue })
-    .from(tenantLimits)
-    .where(and(eq(tenantLimits.tenantId, tenantId), eq(tenantLimits.metric, metric)))
-    .limit(1);
+  const rows = await withTenant(tenantId, async (tx) => {
+    return await tx
+      .select({ limitValue: tenantLimits.limitValue })
+      .from(tenantLimits)
+      .where(and(eq(tenantLimits.tenantId, tenantId), eq(tenantLimits.metric, metric)))
+      .limit(1);
+  });
 
   return rows.length > 0 ? rows[0].limitValue : null;
 }
@@ -53,25 +55,27 @@ export async function setTenantLimit(
   metric: SupportedMetric | string,
   limitValue: number
 ): Promise<void> {
-  const existing = await db
-    .select({ id: tenantLimits.id })
-    .from(tenantLimits)
-    .where(and(eq(tenantLimits.tenantId, tenantId), eq(tenantLimits.metric, metric)))
-    .limit(1);
+  await withTenant(tenantId, async (tx) => {
+    const existing = await tx
+      .select({ id: tenantLimits.id })
+      .from(tenantLimits)
+      .where(and(eq(tenantLimits.tenantId, tenantId), eq(tenantLimits.metric, metric)))
+      .limit(1);
 
-  if (existing.length > 0) {
-    await db
-      .update(tenantLimits)
-      .set({ limitValue, updatedAt: new Date() })
-      .where(eq(tenantLimits.id, existing[0].id));
-  } else {
-    await db.insert(tenantLimits).values({
-      tenantId,
-      metric,
-      limitValue,
-      updatedAt: new Date(),
-    });
-  }
+    if (existing.length > 0) {
+      await tx
+        .update(tenantLimits)
+        .set({ limitValue, updatedAt: new Date() })
+        .where(eq(tenantLimits.id, existing[0].id));
+    } else {
+      await tx.insert(tenantLimits).values({
+        tenantId,
+        metric,
+        limitValue,
+        updatedAt: new Date(),
+      });
+    }
+  });
 }
 
 /**
@@ -82,17 +86,19 @@ export async function getTenantUsage(
   metric: SupportedMetric | string,
   period = getCurrentPeriodKey()
 ): Promise<number> {
-  const rows = await db
-    .select({ count: usageCounters.count })
-    .from(usageCounters)
-    .where(
-      and(
-        eq(usageCounters.tenantId, tenantId),
-        eq(usageCounters.metric, metric),
-        eq(usageCounters.period, period)
+  const rows = await withTenant(tenantId, async (tx) => {
+    return await tx
+      .select({ count: usageCounters.count })
+      .from(usageCounters)
+      .where(
+        and(
+          eq(usageCounters.tenantId, tenantId),
+          eq(usageCounters.metric, metric),
+          eq(usageCounters.period, period)
+        )
       )
-    )
-    .limit(1);
+      .limit(1);
+  });
 
   return rows.length > 0 ? rows[0].count : 0;
 }
@@ -115,7 +121,7 @@ export async function consume(
 
   // If a limit is configured, perform atomic check-and-increment inside transaction
   if (limit !== null) {
-    return await db.transaction(async (tx) => {
+    return await withTenant(tenantId, async (tx) => {
       // Upsert row if not exists
       await tx
         .insert(usageCounters)
@@ -165,24 +171,27 @@ export async function consume(
     });
   }
 
-  // If unlimited, perform upsert increment
-  const [res] = await db
-    .insert(usageCounters)
-    .values({
-      tenantId,
-      metric,
-      period,
-      count: amount,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: [usageCounters.tenantId, usageCounters.metric, usageCounters.period],
-      set: {
-        count: sql`${usageCounters.count} + ${amount}`,
+  // If unlimited, perform upsert increment under withTenant
+  const res = await withTenant(tenantId, async (tx) => {
+    const [row] = await tx
+      .insert(usageCounters)
+      .values({
+        tenantId,
+        metric,
+        period,
+        count: amount,
         updatedAt: new Date(),
-      },
-    })
-    .returning({ count: usageCounters.count });
+      })
+      .onConflictDoUpdate({
+        target: [usageCounters.tenantId, usageCounters.metric, usageCounters.period],
+        set: {
+          count: sql`${usageCounters.count} + ${amount}`,
+          updatedAt: new Date(),
+        },
+      })
+      .returning({ count: usageCounters.count });
+    return row;
+  });
 
   return { current: res.count, limit: null };
 }
