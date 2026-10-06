@@ -4,14 +4,14 @@ import { eq, or, notIlike, isNull, inArray } from "drizzle-orm";
 import { auditWebsite, AuditFetchError } from "@/lib/auditor";
 import { qualifyLead, LeadDecision } from "@/lib/qualifier";
 import { generateOfferContent } from "@/lib/gemini";
-import { requireUser } from "@/lib/auth";
+import { requireUser, requireTenant } from "@/lib/auth";
 import { transitionLead, LeadStatus } from "@/lib/state-machine";
 import crypto from "crypto";
 import slugify from "slugify";
 
 export async function POST(req: Request) {
   try {
-    const user = await requireUser();
+    const { user, tenantId } = await requireTenant();
     const body = await req.json().catch(() => ({}));
 
     const report = {
@@ -27,10 +27,8 @@ export async function POST(req: Request) {
       errors: [] as string[],
     };
 
-    const userTenantId = user.tenantId || 1;
-
     const allLeads = await db.query.leads.findMany({
-      where: eq(leads.tenantId, userTenantId),
+      where: eq(leads.tenantId, tenantId),
       with: { audit: true, offer: true, contacts: true, messages: true },
     });
 
@@ -215,6 +213,9 @@ export async function POST(req: Request) {
   } catch (err: any) {
     if (err?.name === "AuthenticationError") {
       return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
+    if (err?.name === "AuthorizationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 403 });
     }
     console.error("Pipeline run failed:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

@@ -19,16 +19,6 @@ export async function GET() {
       });
       if (record?.value && typeof record.value === "object") {
         dbIntegrations = record.value as Record<string, string>;
-        // Hydrate in-memory process.env if present in DB
-        if (dbIntegrations.googleApiKey && !process.env.GOOGLE_MAPS_API_KEY) {
-          process.env.GOOGLE_MAPS_API_KEY = dbIntegrations.googleApiKey;
-        }
-        if (dbIntegrations.geminiApiKey && !process.env.GEMINI_API_KEY) {
-          process.env.GEMINI_API_KEY = dbIntegrations.geminiApiKey;
-        }
-        if (dbIntegrations.netlifyToken && !process.env.NETLIFY_AUTH_TOKEN) {
-          process.env.NETLIFY_AUTH_TOKEN = dbIntegrations.netlifyToken;
-        }
       }
     } catch {}
 
@@ -89,63 +79,49 @@ export async function POST(req: Request) {
 
     const updatedIntegrations = { ...existingIntegrations };
 
-    // Update in-memory process.env and DB payload
+    // Update DB payload (never set process.env in runtime)
     if (body.smtpHost !== undefined) {
-      process.env.SMTP_HOST = body.smtpHost;
       updatedIntegrations.smtpHost = body.smtpHost;
     }
     if (body.smtpPort !== undefined) {
-      process.env.SMTP_PORT = String(body.smtpPort);
       updatedIntegrations.smtpPort = String(body.smtpPort);
     }
     if (body.smtpUser !== undefined) {
-      process.env.SMTP_USER = body.smtpUser;
       updatedIntegrations.smtpUser = body.smtpUser;
     }
     if (body.smtpPass && body.smtpPass !== "••••••••") {
-      process.env.SMTP_PASSWORD = body.smtpPass;
       updatedIntegrations.smtpPass = body.smtpPass;
     }
     if (body.smtpFromEmail !== undefined) {
-      process.env.SMTP_FROM_EMAIL = body.smtpFromEmail;
       updatedIntegrations.smtpFromEmail = body.smtpFromEmail;
     }
     if (body.smtpFromName !== undefined) {
-      process.env.SMTP_FROM_NAME = body.smtpFromName;
       updatedIntegrations.smtpFromName = body.smtpFromName;
     }
 
     if (body.imapHost !== undefined) {
-      process.env.IMAP_HOST = body.imapHost;
       updatedIntegrations.imapHost = body.imapHost;
     }
     if (body.imapPort !== undefined) {
-      process.env.IMAP_PORT = String(body.imapPort);
       updatedIntegrations.imapPort = String(body.imapPort);
     }
     if (body.imapUser !== undefined) {
-      process.env.IMAP_USER = body.imapUser;
       updatedIntegrations.imapUser = body.imapUser;
     }
     if (body.imapPass && body.imapPass !== "••••••••") {
-      process.env.IMAP_PASSWORD = body.imapPass;
       updatedIntegrations.imapPass = body.imapPass;
     }
 
     if (body.googleApiKey && body.googleApiKey !== "••••••••") {
       const cleanGKey = body.googleApiKey.trim();
-      process.env.GOOGLE_MAPS_API_KEY = cleanGKey;
-      process.env.GOOGLE_PLACES_KEY = cleanGKey;
       updatedIntegrations.googleApiKey = cleanGKey;
     }
     if (body.geminiApiKey && body.geminiApiKey !== "••••••••") {
       const cleanGemini = body.geminiApiKey.trim();
-      process.env.GEMINI_API_KEY = cleanGemini;
       updatedIntegrations.geminiApiKey = cleanGemini;
     }
     if (body.netlifyToken && body.netlifyToken !== "••••••••") {
       const cleanNetlify = body.netlifyToken.trim();
-      process.env.NETLIFY_AUTH_TOKEN = cleanNetlify;
       updatedIntegrations.netlifyToken = cleanNetlify;
     }
 

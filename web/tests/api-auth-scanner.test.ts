@@ -47,8 +47,8 @@ describe("API Security Scanner (Invariant 4)", () => {
 
       const content = fs.readFileSync(filePath, "utf-8");
 
-      // Check for presence of requireUser() or session authorization
-      const hasRequireUser = content.includes("requireUser()");
+      // Check for presence of requireUser(), requireTenant() or session authorization
+      const hasRequireUser = content.includes("requireUser()") || content.includes("requireTenant()");
       const hasSessionAuth = content.includes("pm_session_token") || content.includes("getCurrentUser()");
       const hasCronSecret = content.includes("CRON_SECRET");
 

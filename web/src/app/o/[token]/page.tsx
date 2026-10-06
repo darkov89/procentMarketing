@@ -75,7 +75,7 @@ export default async function SecureOfferPage({
 
     await db.insert(leadEvents).values({
       leadId: offer.leadId,
-      tenantId: offer.tenantId || 1,
+      tenantId: offer.tenantId,
       fromStatus: offer.lead.status,
       toStatus: offer.lead.status,
       reason: `Klient otworzył stronę oferty (/o/${token}) - wyświetlenie #${(offer.viewCount || 0) + 1}`,

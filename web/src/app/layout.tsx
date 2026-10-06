@@ -17,7 +17,11 @@ export const metadata: Metadata = {
   description: "Zaawansowany system automatyzacji procesów pozyskiwania leadów, weryfikacji w rejestrach i hiper-personalizacji ofert.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html
       lang="pl"

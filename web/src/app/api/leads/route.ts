@@ -3,21 +3,19 @@ import { db, leads, audits, offers, messages, contacts, leadEvents } from "@/lib
 import { desc, or, ilike, notIlike, isNull, eq } from "drizzle-orm";
 import { validateGeo } from "@/lib/geo";
 import { normalizeNip, normalizePhone } from "@/lib/dedup";
-import { requireUser } from "@/lib/auth";
+import { requireUser, requireTenant } from "@/lib/auth";
 
 export async function GET(req: Request) {
   try {
-    const user = await requireUser();
+    const { tenantId } = await requireTenant();
     const { searchParams } = new URL(req.url);
     const search = searchParams.get("search")?.toLowerCase();
     const city = searchParams.get("city");
     const status = searchParams.get("status");
 
-    const userTenantId = user.tenantId || 1;
-
     // Fetch tenant's leads with joined audit, offer, contacts, messages
     const allLeads = await db.query.leads.findMany({
-      where: eq(leads.tenantId, userTenantId),
+      where: eq(leads.tenantId, tenantId),
       orderBy: [desc(leads.score), desc(leads.id)],
       with: {
         audit: true,
@@ -54,6 +52,9 @@ export async function GET(req: Request) {
     if (err?.name === "AuthenticationError") {
       return NextResponse.json({ success: false, error: err.message }, { status: 401 });
     }
+    if (err?.name === "AuthorizationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 403 });
+    }
     console.error("Error fetching leads:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
@@ -61,7 +62,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   try {
-    const user = await requireUser();
+    const { user, tenantId } = await requireTenant();
     const body = await req.json();
     const { companyName, city, address, website, email, phone, industry } = body;
 
@@ -82,7 +83,6 @@ export async function POST(req: Request) {
     }
 
     const normPhone = normalizePhone(phone);
-    const tenantId = user.tenantId || 1;
     const [newLead] = await db
       .insert(leads)
       .values({
@@ -114,6 +114,9 @@ export async function POST(req: Request) {
   } catch (err: any) {
     if (err?.name === "AuthenticationError") {
       return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
+    if (err?.name === "AuthorizationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 403 });
     }
     console.error("Error creating lead:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

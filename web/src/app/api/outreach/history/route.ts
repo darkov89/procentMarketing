@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { db, leads, messages, contacts, offers } from "@/lib/db";
 import { eq, desc, and } from "drizzle-orm";
-import { requireUser } from "@/lib/auth";
+import { requireUser, requireTenant } from "@/lib/auth";
 
 export async function GET(req: Request) {
   try {
-    const user = await requireUser();
-    const tenantId = user.tenantId || 1;
+    const { tenantId } = await requireTenant();
 
     // Fetch all leads for this tenant that have outreach messages or are in outreach stages
     const tenantLeads = await db.query.leads.findMany({
@@ -139,6 +138,9 @@ export async function GET(req: Request) {
   } catch (err: any) {
     if (err?.name === "AuthenticationError") {
       return NextResponse.json({ success: false, error: err.message }, { status: 401 });
+    }
+    if (err?.name === "AuthorizationError") {
+      return NextResponse.json({ success: false, error: err.message }, { status: 403 });
     }
     console.error("Outreach history GET error:", err);
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
