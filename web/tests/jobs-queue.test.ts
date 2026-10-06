@@ -143,7 +143,7 @@ describe("Phase 6 Jobs Queue, Fair Share & Worker Invariants", () => {
 
   it("executes queue tick and dispatches registered handlers successfully", async () => {
     let customHandlerCalled = false;
-    jobRegistry.register("test_tick_action", async (_job) => {
+    jobRegistry.register("test_job", async (_job) => {
       customHandlerCalled = true;
       return { success: true };
     });
@@ -151,7 +151,7 @@ describe("Phase 6 Jobs Queue, Fair Share & Worker Invariants", () => {
     const suffix = Date.now();
     await jobQueue.enqueue({
       tenantId: TENANT_A,
-      type: "cleanup",
+      type: "test_job",
       idempotencyKey: `tick_${suffix}`,
       payload: { timestamp: suffix },
       priority: 1,

@@ -855,6 +855,31 @@ export const pricingConfigs = pgTable(
   ]
 );
 
+export const statsDaily = pgTable(
+  "stats_daily",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .references(() => tenants.id, { onDelete: "cascade" })
+      .notNull(),
+    campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    metric: varchar("metric", { length: 64 }).notNull(),
+    value: bigint("value", { mode: "number" }).default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("stats_daily_tenant_campaign_date_metric_key").on(
+      table.tenantId,
+      table.campaignId,
+      table.date,
+      table.metric
+    ),
+  ]
+);
+
+
 // Relations
 export const leadsRelations = relations(leads, ({ one, many }) => ({
   tenant: one(tenants, {

@@ -13,7 +13,8 @@ export type SystemJobType =
   | "rollup_stats"
   | "cleanup"
   | "audit_lead"
-  | "generate_offer";
+  | "generate_offer"
+  | "test_job";
 
 export interface EnqueueJobParams {
   tenantId: number;
