@@ -875,7 +875,7 @@ export const statsDaily = pgTable(
       table.campaignId,
       table.date,
       table.metric
-    ),
+    ).nullsNotDistinct(),
   ]
 );
 
