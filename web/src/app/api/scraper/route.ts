@@ -29,7 +29,6 @@ async function getResolvedGoogleApiKey(): Promise<string | undefined> {
     if (record?.value && typeof record.value === "object") {
       const val = record.value as Record<string, string>;
       if (val.googleApiKey && !val.googleApiKey.includes("••••••••")) {
-        process.env.GOOGLE_MAPS_API_KEY = val.googleApiKey.trim();
         return val.googleApiKey.trim();
       }
     }
@@ -396,12 +395,12 @@ export async function POST(req: Request) {
               phone: p.phone || "",
               website: p.website || "",
               industry: keyword,
-              lat: p.lat || centerPoint.lat,
-              lon: p.lon || centerPoint.lon,
+              lat: p.lat ?? null,
+              lon: p.lon ?? null,
               companyScale: itemScale,
               legalForm: itemLegal,
-              googleRating: p.rating || 4.7,
-              googleReviewsCount: p.reviewsCount || 15,
+              googleRating: p.rating ?? null,
+              googleReviewsCount: p.reviewsCount ?? null,
             });
           }
         } else if (placesResult.error) {
@@ -598,8 +597,8 @@ async function processItems(
           registryVerified: isRegistryVerified,
           registrySource,
           vatStatus,
-          googleRating: item.googleRating || 4.7,
-          googleReviewsCount: item.googleReviewsCount || 18,
+          googleRating: item.googleRating ?? null,
+          googleReviewsCount: item.googleReviewsCount ?? null,
         },
         sourceName,
         createdAt: new Date(),

@@ -1,10 +1,10 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import nodemailer from "nodemailer";
 import { db, messages, suppression } from "./db";
 import { eq, or } from "drizzle-orm";
 import { GoogleGenAI } from "@google/genai";
+import { sendMessage } from "./send-service";
 
 export interface EmailDraft {
   recipientEmail: string;
@@ -406,7 +406,7 @@ export async function sendEmailSafely(params: {
       leadId,
       direction: "outbound",
       channel: "email",
-      status: "draft",
+      status: "scheduled",
       idempotencyKey,
       inReplyTo: inReplyTo || undefined,
       subject: draft.subject,
@@ -416,57 +416,14 @@ export async function sendEmailSafely(params: {
     })
     .returning();
 
-  // 7. Physical SMTP or Mock Sandbox Dispatch
-  const smtpHost = process.env.SMTP_HOST;
-  const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
-  const smtpUser = process.env.SMTP_USER;
-  const smtpPass = process.env.SMTP_PASSWORD;
-  const fromEmail = process.env.SMTP_FROM_EMAIL || "kontakt@procentmarketing.pl";
-  const fromName = process.env.SMTP_FROM_NAME || "Procent Marketing";
-
-  let messageId = `sandbox-${idempotencyKey.slice(0, 16)}`;
-
-  if (smtpHost && smtpUser && smtpPass) {
-    try {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
-
-      const info = await transporter.sendMail({
-        from: `"${fromName}" <${fromEmail}>`,
-        to: targetRecipient,
-        subject: wasTestMode ? `[TEST SANDBOX] ${draft.subject}` : draft.subject,
-        text: draft.bodyText,
-        html: draft.bodyHtml,
-      });
-
-      messageId = info.messageId || messageId;
-    } catch (smtpErr: any) {
-      console.warn("SMTP send failed, falling back to mock record:", smtpErr?.message);
-    }
-  }
-
-  // 8. Update Message record to sent status
-  await db
-    .update(messages)
-    .set({
-      status: "sent",
-      sentAt: new Date(),
-      messageId,
-    })
-    .where(eq(messages.id, createdMessage.id));
+  // 7. INVARIANT 2: Single SMTP Send Path via sendMessage(messageId)
+  const sendRes = await sendMessage(createdMessage.id, { ignoreWindow });
 
   return {
-    success: true,
-    messageId,
-    errorMessage: null,
-    wasTestMode,
-    recipient: targetRecipient,
+    success: sendRes.success,
+    messageId: sendRes.smtpMessageId,
+    errorMessage: sendRes.reason || null,
+    wasTestMode: sendRes.isTestMode,
+    recipient: sendRes.recipient,
   };
 }

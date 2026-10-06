@@ -25,7 +25,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      activeTenantId: user.tenantId || 1,
+      activeTenantId: user.tenantId ?? null,
       tenants: memberships,
     });
   } catch (err: any) {

@@ -4,7 +4,7 @@ import { db, users, invitations, sessions, tenants, tenantMembers } from "@/lib/
 import { eq, and, gt } from "drizzle-orm";
 
 export const SESSION_COOKIE_NAME = "pm_session_token";
-export const BOOTSTRAP_INVITE_CODE = process.env.BOOTSTRAP_INVITE_CODE || "PROCENT-START-2026";
+export const BOOTSTRAP_INVITE_CODE = process.env.BOOTSTRAP_INVITE_CODE || "";
 
 export interface SafeUser {
   id: number;
@@ -68,8 +68,8 @@ export async function validateInviteCode(
     return { valid: false, error: "Wymagany jest kod zaproszenia", role: "member" };
   }
 
-  // Check master bootstrap code
-  if (trimmed === BOOTSTRAP_INVITE_CODE) {
+  // Check master bootstrap code (only if explicitly set in environment)
+  if (BOOTSTRAP_INVITE_CODE && trimmed === BOOTSTRAP_INVITE_CODE) {
     return { valid: true, role: "admin" };
   }
 
@@ -145,12 +145,8 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
 
     const user = result[0];
 
-    // Resolve tenant membership
-    let tenantInfo = {
-      tenantId: 1,
-      tenantSlug: "procent-marketing",
-      tenantName: "Procent Marketing",
-    };
+    // Resolve tenant membership strictly from database
+    let tenantInfo: { tenantId?: number; tenantSlug?: string; tenantName?: string } = {};
 
     try {
       const membership = await db
@@ -167,8 +163,10 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
       if (membership.length > 0) {
         tenantInfo = membership[0];
       }
-    } catch {
-      // Fallback to default tenant
+    } catch (err) {
+      console.error("Error loading tenant membership:", err);
+      // Fail closed on database error: do not grant access to fallback tenant
+      return null;
     }
 
     return {
@@ -206,6 +204,13 @@ export class AuthenticationError extends Error {
   }
 }
 
+export class AuthorizationError extends Error {
+  constructor(message = "Brak dostępu do zasobów wybranej organizacji (tenanta).") {
+    super(message);
+    this.name = "AuthorizationError";
+  }
+}
+
 /**
  * Get currently authenticated user in server components and route handlers
  */
@@ -230,5 +235,18 @@ export async function requireUser(): Promise<SafeUser> {
     throw new AuthenticationError();
   }
   return user;
+}
+
+/**
+ * INVARIANT 4 & R4: Multi-tenant context guard.
+ * Returns authenticated user and validated tenantId.
+ * Strictly throws AuthorizationError (403) if user is not a member of any tenant.
+ */
+export async function requireTenant(): Promise<{ user: SafeUser; tenantId: number }> {
+  const user = await requireUser();
+  if (!user.tenantId) {
+    throw new AuthorizationError("Użytkownik nie jest przypisany do żadnej organizacji.");
+  }
+  return { user, tenantId: user.tenantId };
 }
 
