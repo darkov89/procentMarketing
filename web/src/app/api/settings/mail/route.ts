@@ -1,17 +1,18 @@
 import { NextResponse } from "next/server";
 import { getResolvedMailConfig } from "@/lib/mail-service";
-import { requireUser, requireTenant } from "@/lib/auth";
+import { requireTenant } from "@/lib/auth";
 import { db, appSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
+import { setSecret, getSecret, hasSecret } from "@/lib/secrets";
 import fs from "fs";
 import path from "path";
 
 export async function GET() {
   try {
-    await requireUser();
+    const { tenantId } = await requireTenant();
     const cfg = getResolvedMailConfig();
 
-    // Check DB integrations for persisted keys
+    // Check DB integrations for non-secret configs
     let dbIntegrations: Record<string, string> = {};
     try {
       const record = await db.query.appSettings.findFirst({
@@ -22,9 +23,11 @@ export async function GET() {
       }
     } catch {}
 
-    const googleKey = process.env.GOOGLE_MAPS_API_KEY || dbIntegrations.googleApiKey || "";
-    const geminiKey = process.env.GEMINI_API_KEY || dbIntegrations.geminiApiKey || "";
-    const netlifyTok = process.env.NETLIFY_AUTH_TOKEN || dbIntegrations.netlifyToken || "";
+    const hasSmtpSecret = (await hasSecret(tenantId, "smtp_password")) || !!cfg.smtpPass;
+    const hasImapSecret = (await hasSecret(tenantId, "imap_password")) || !!cfg.imapPass;
+    const hasGoogleKey = (await hasSecret(tenantId, "google_api_key")) || !!process.env.GOOGLE_MAPS_API_KEY;
+    const hasGeminiKey = (await hasSecret(tenantId, "gemini_api_key")) || !!process.env.GEMINI_API_KEY;
+    const hasNetlifyTok = (await hasSecret(tenantId, "netlify_token")) || !!process.env.NETLIFY_AUTH_TOKEN;
 
     return NextResponse.json({
       success: true,
@@ -32,8 +35,8 @@ export async function GET() {
         smtpHost: cfg.smtpHost || dbIntegrations.smtpHost || "",
         smtpPort: cfg.smtpPort || (dbIntegrations.smtpPort ? parseInt(dbIntegrations.smtpPort, 10) : 587),
         smtpUser: cfg.smtpUser || dbIntegrations.smtpUser || "",
-        smtpPass: cfg.smtpPass || dbIntegrations.smtpPass ? "••••••••" : "",
-        hasSmtpPass: !!(cfg.smtpPass || dbIntegrations.smtpPass),
+        smtpPass: hasSmtpSecret ? "••••••••" : "",
+        hasSmtpPass: hasSmtpSecret,
         smtpSecure: cfg.smtpSecure,
         smtpFromEmail: cfg.smtpFromEmail || dbIntegrations.smtpFromEmail || "kontakt@procentmarketing.pl",
         smtpFromName: cfg.smtpFromName || dbIntegrations.smtpFromName || "Procent Marketing",
@@ -41,20 +44,20 @@ export async function GET() {
         imapHost: cfg.imapHost || dbIntegrations.imapHost || "",
         imapPort: cfg.imapPort || (dbIntegrations.imapPort ? parseInt(dbIntegrations.imapPort, 10) : 993),
         imapUser: cfg.imapUser || dbIntegrations.imapUser || "",
-        imapPass: cfg.imapPass || dbIntegrations.imapPass ? "••••••••" : "",
-        hasImapPass: !!(cfg.imapPass || dbIntegrations.imapPass),
+        imapPass: hasImapSecret ? "••••••••" : "",
+        hasImapPass: hasImapSecret,
         imapTls: cfg.imapTls,
 
-        googleApiKey: googleKey ? "••••••••" : "",
-        hasGoogleApiKey: !!googleKey,
-        geminiApiKey: geminiKey ? "••••••••" : "",
-        hasGeminiApiKey: !!geminiKey,
-        netlifyToken: netlifyTok ? "••••••••" : "",
-        hasNetlifyToken: !!netlifyTok,
+        googleApiKey: hasGoogleKey ? "••••••••" : "",
+        hasGoogleApiKey: hasGoogleKey,
+        geminiApiKey: hasGeminiKey ? "••••••••" : "",
+        hasGeminiApiKey: hasGeminiKey,
+        netlifyToken: hasNetlifyTok ? "••••••••" : "",
+        hasNetlifyToken: hasNetlifyTok,
       },
     });
   } catch (err: any) {
-    if (err?.name === "AuthenticationError") {
+    if (err?.name === "AuthenticationError" || err?.name === "AuthorizationError") {
       return NextResponse.json({ success: false, error: err.message }, { status: 401 });
     }
     return NextResponse.json({ success: false, error: err?.message || String(err) }, { status: 500 });
@@ -112,20 +115,24 @@ export async function POST(req: Request) {
       updatedIntegrations.imapPass = body.imapPass;
     }
 
+    // Save sensitive credentials into encrypted tenant_secrets (R9)
+    if (body.smtpPass && body.smtpPass !== "••••••••") {
+      await setSecret(tenantId, "smtp_password", body.smtpPass);
+    }
+    if (body.imapPass && body.imapPass !== "••••••••") {
+      await setSecret(tenantId, "imap_password", body.imapPass);
+    }
     if (body.googleApiKey && body.googleApiKey !== "••••••••") {
-      const cleanGKey = body.googleApiKey.trim();
-      updatedIntegrations.googleApiKey = cleanGKey;
+      await setSecret(tenantId, "google_api_key", body.googleApiKey.trim());
     }
     if (body.geminiApiKey && body.geminiApiKey !== "••••••••") {
-      const cleanGemini = body.geminiApiKey.trim();
-      updatedIntegrations.geminiApiKey = cleanGemini;
+      await setSecret(tenantId, "gemini_api_key", body.geminiApiKey.trim());
     }
     if (body.netlifyToken && body.netlifyToken !== "••••••••") {
-      const cleanNetlify = body.netlifyToken.trim();
-      updatedIntegrations.netlifyToken = cleanNetlify;
+      await setSecret(tenantId, "netlify_token", body.netlifyToken.trim());
     }
 
-    // Persist permanently to PostgreSQL app_settings table
+    // Persist permanently non-secret settings to PostgreSQL app_settings table
     try {
       const existing = await db.query.appSettings.findFirst({
         where: eq(appSettings.key, "system_integrations"),
@@ -149,57 +156,6 @@ export async function POST(req: Request) {
       }
     } catch (dbErr) {
       console.warn("Could not save to appSettings table:", dbErr);
-    }
-
-    // Persist to local .env.local file if possible
-    try {
-      const envPath = path.resolve(process.cwd(), ".env.local");
-      let currentContent = "";
-      if (fs.existsSync(envPath)) {
-        currentContent = fs.readFileSync(envPath, "utf-8");
-      }
-
-      const updates: Record<string, string> = {
-        SMTP_HOST: process.env.SMTP_HOST || "",
-        SMTP_PORT: process.env.SMTP_PORT || "587",
-        SMTP_USER: process.env.SMTP_USER || "",
-        SMTP_FROM_EMAIL: process.env.SMTP_FROM_EMAIL || "kontakt@procentmarketing.pl",
-        SMTP_FROM_NAME: process.env.SMTP_FROM_NAME || "Procent Marketing",
-        IMAP_HOST: process.env.IMAP_HOST || "",
-        IMAP_PORT: process.env.IMAP_PORT || "993",
-        IMAP_USER: process.env.IMAP_USER || "",
-      };
-
-      if (process.env.SMTP_PASSWORD) updates.SMTP_PASSWORD = process.env.SMTP_PASSWORD;
-      if (process.env.IMAP_PASSWORD) updates.IMAP_PASSWORD = process.env.IMAP_PASSWORD;
-      if (process.env.GOOGLE_MAPS_API_KEY) updates.GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
-      if (process.env.GEMINI_API_KEY) updates.GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-      if (process.env.NETLIFY_AUTH_TOKEN) updates.NETLIFY_AUTH_TOKEN = process.env.NETLIFY_AUTH_TOKEN;
-
-      const lines = currentContent.split("\n");
-      const existingKeys = new Set<string>();
-
-      const newLines = lines.map((line) => {
-        const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
-        if (match) {
-          const key = match[1];
-          existingKeys.add(key);
-          if (updates[key] !== undefined) {
-            return `${key}="${updates[key]}"`;
-          }
-        }
-        return line;
-      });
-
-      for (const [key, val] of Object.entries(updates)) {
-        if (!existingKeys.has(key) && val) {
-          newLines.push(`${key}="${val}"`);
-        }
-      }
-
-      fs.writeFileSync(envPath, newLines.join("\n").trim() + "\n", "utf-8");
-    } catch (saveErr) {
-      console.warn("Could not save to .env.local file directly:", saveErr);
     }
 
     return NextResponse.json({

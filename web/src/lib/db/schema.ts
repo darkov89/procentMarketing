@@ -57,6 +57,7 @@ export const tenantMembers = pgTable(
       .references(() => users.id, { onDelete: "cascade" })
       .notNull(),
     role: varchar("role", { length: 50 }).default("owner").notNull(),
+    capabilities: text("capabilities").array().default([]).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -428,6 +429,62 @@ export const serviceCatalog = pgTable("service_catalog", {
   active: boolean("active").default(true).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const tenantSecrets = pgTable(
+  "tenant_secrets",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .references(() => tenants.id, { onDelete: "cascade" })
+      .notNull(),
+    name: varchar("name", { length: 64 }).notNull(),
+    ciphertext: text("ciphertext").notNull(),
+    iv: text("iv").notNull(),
+    tag: text("tag").notNull(),
+    keyVersion: integer("key_version").default(1).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("tenant_secrets_tenant_id_name_unique").on(table.tenantId, table.name),
+  ]
+);
+
+export const tenantLimits = pgTable(
+  "tenant_limits",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .references(() => tenants.id, { onDelete: "cascade" })
+      .notNull(),
+    metric: varchar("metric", { length: 64 }).notNull(),
+    limitValue: integer("limit_value").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("tenant_limits_tenant_id_metric_unique").on(table.tenantId, table.metric),
+  ]
+);
+
+export const usageCounters = pgTable(
+  "usage_counters",
+  {
+    id: serial("id").primaryKey(),
+    tenantId: integer("tenant_id")
+      .references(() => tenants.id, { onDelete: "cascade" })
+      .notNull(),
+    metric: varchar("metric", { length: 64 }).notNull(),
+    period: varchar("period", { length: 32 }).notNull(), // e.g. "2026-10", "2026-10-06", "all_time"
+    count: integer("count").default(0).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("usage_counters_tenant_id_metric_period_unique").on(
+      table.tenantId,
+      table.metric,
+      table.period
+    ),
+  ]
+);
 
 // Relations
 export const leadsRelations = relations(leads, ({ one, many }) => ({
