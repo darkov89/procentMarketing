@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getResolvedMailConfig } from "@/lib/mail-service";
-import { requireUser } from "@/lib/auth";
+import { requireUser, requireTenant } from "@/lib/auth";
 import { db, appSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import fs from "fs";
@@ -63,7 +63,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await requireUser();
+    const { tenantId } = await requireTenant();
     const body = await req.json();
 
     // Fetch existing DB integrations
@@ -141,6 +141,7 @@ export async function POST(req: Request) {
           .where(eq(appSettings.key, "system_integrations"));
       } else {
         await db.insert(appSettings).values({
+          tenantId,
           key: "system_integrations",
           value: updatedIntegrations,
           updatedAt: new Date(),

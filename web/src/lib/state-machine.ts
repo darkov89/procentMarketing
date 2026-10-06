@@ -140,6 +140,7 @@ export async function transitionLead(params: TransitionParams) {
   const [currentLead] = await db
     .select({
       id: leads.id,
+      tenantId: leads.tenantId,
       status: leads.status,
       sequenceStep: leads.sequenceStep,
       isFixture: leads.isFixture,
@@ -217,6 +218,7 @@ export async function transitionLead(params: TransitionParams) {
   await db.update(leads).set(updateData).where(eq(leads.id, leadId));
 
   await db.insert(leadEvents).values({
+    tenantId: currentLead.tenantId,
     leadId,
     fromStatus,
     toStatus,

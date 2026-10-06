@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db, appSettings } from "@/lib/db";
 import { eq } from "drizzle-orm";
-import { requireUser } from "@/lib/auth";
+import { requireUser, requireTenant } from "@/lib/auth";
 
 export interface TargetingPreferences {
   targetVoivodeship: string; // "Dolnośląskie", "Mazowieckie", ..., "Cała Polska"
@@ -71,7 +71,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await requireUser();
+    const { tenantId } = await requireTenant();
     const body = await req.json();
 
     const preferences: TargetingPreferences = {
@@ -108,6 +108,7 @@ export async function POST(req: Request) {
         .where(eq(appSettings.key, "targeting_preferences"));
     } else {
       await db.insert(appSettings).values({
+        tenantId,
         key: "targeting_preferences",
         value: preferences,
         updatedAt: new Date(),

@@ -4,7 +4,7 @@ import { eq, or } from "drizzle-orm";
 import { validateGeo, resolveCityCoordinates } from "@/lib/geo";
 import { normalizePhone, normalizeNip, normalizeDomain } from "@/lib/dedup";
 import { auditWebsite } from "@/lib/auditor";
-import { requireUser } from "@/lib/auth";
+import { requireUser, requireTenant } from "@/lib/auth";
 import { searchGooglePlaces } from "@/lib/google-places";
 import { verifyCompanyRegistry } from "@/lib/registries";
 
@@ -321,7 +321,7 @@ const POLISH_BUSINESS_CATALOG: Record<
 
 export async function POST(req: Request) {
   try {
-    await requireUser();
+    const { tenantId } = await requireTenant();
     const body = await req.json();
 
     // 1. Direct CSV Import
@@ -331,7 +331,9 @@ export async function POST(req: Request) {
         body.radiusKm !== undefined ? Number(body.radiusKm) : 0,
         "import_csv",
         body.city || "Polska",
-        body.voivodeship || "Dolnośląskie"
+        body.voivodeship || "Dolnośląskie",
+        undefined,
+        tenantId
       );
       return NextResponse.json(csvRes);
     }
@@ -458,7 +460,8 @@ export async function POST(req: Request) {
       `scraper_${companyScale}`,
       city,
       voivodeship,
-      centerPoint
+      centerPoint,
+      tenantId
     );
 
     return NextResponse.json({
@@ -487,7 +490,8 @@ async function processItems(
   sourceName: string,
   centerCity: string = "Wrocław",
   centerVoivodeship: string = "Dolnośląskie",
-  centerCoordinates?: { lat: number; lon: number }
+  centerCoordinates?: { lat: number; lon: number },
+  tenantId: number = 1
 ) {
   let addedCount = 0;
   let rejectedRadius = 0;
@@ -576,6 +580,7 @@ async function processItems(
     const [inserted] = await db
       .insert(leads)
       .values({
+        tenantId,
         companyName: item.companyName,
         nip: verifiedNip,
         regon: verifiedRegon,
@@ -610,6 +615,7 @@ async function processItems(
     if (verifiedOwnerName) {
       try {
         await db.insert(contacts).values({
+          tenantId,
           leadId: inserted.id,
           firstName: verifiedOwnerName,
           role: verifiedOwnerRole || "Właściciel / Zarząd",
@@ -626,6 +632,7 @@ async function processItems(
       try {
         const auditData = await auditWebsite(inserted.website);
         await db.insert(audits).values({
+          tenantId,
           leadId: inserted.id,
           ...auditData,
           auditedAt: new Date(),

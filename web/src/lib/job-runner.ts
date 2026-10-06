@@ -20,6 +20,7 @@ export type JobType =
   | "process_followups";
 
 export interface EnqueueOptions {
+  tenantId?: number;
   runAt?: Date;
   maxAttempts?: number;
 }
@@ -35,6 +36,7 @@ export async function enqueueJob(
   const [job] = await db
     .insert(jobs)
     .values({
+      tenantId: options.tenantId || (payload.tenantId as number) || 1,
       type,
       payload,
       status: "pending",
@@ -132,10 +134,10 @@ export async function executeJob(job: typeof jobs.$inferSelect): Promise<{ succe
 
       try {
         const auditData = await auditWebsite(lead.website);
-        await db.insert(audits).values({ leadId, ...auditData, auditedAt: new Date() }).onConflictDoNothing();
+        await db.insert(audits).values({ tenantId: lead.tenantId, leadId, ...auditData, auditedAt: new Date() }).onConflictDoNothing();
 
         // Enqueue qualification job
-        await enqueueJob("qualify_lead", { leadId });
+        await enqueueJob("qualify_lead", { leadId, tenantId: lead.tenantId }, { tenantId: lead.tenantId });
         return { success: true, result: auditData };
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
@@ -159,7 +161,7 @@ export async function executeJob(job: typeof jobs.$inferSelect): Promise<{ succe
       });
 
       if (qRes.suggestedStatus === "qualified") {
-        await enqueueJob("generate_offer", { leadId });
+        await enqueueJob("generate_offer", { leadId, tenantId: lead.tenantId }, { tenantId: lead.tenantId });
       }
 
       return { success: true, result: qRes };
@@ -181,6 +183,7 @@ export async function executeJob(job: typeof jobs.$inferSelect): Promise<{ succe
       if (Array.isArray(offerContent.observations)) {
         for (const obs of offerContent.observations) {
           const [ev] = await db.insert(evidence).values({
+            tenantId: lead.tenantId,
             leadId,
             claimType: obs.evidenceKey || "audit_finding",
             claimValue: `${obs.finding} (Wpływ: ${obs.impact})`,
@@ -195,6 +198,7 @@ export async function executeJob(job: typeof jobs.$inferSelect): Promise<{ succe
       }
 
       await db.insert(offers).values({
+        tenantId: lead.tenantId,
         leadId,
         slug: safeSlug,
         token: secureToken,
@@ -297,6 +301,7 @@ export async function executeJob(job: typeof jobs.$inferSelect): Promise<{ succe
           const [scheduledMsg] = await db
             .insert(messages)
             .values({
+              tenantId: l.tenantId,
               leadId: l.id,
               direction: "outbound",
               channel: "email",
@@ -313,7 +318,11 @@ export async function executeJob(job: typeof jobs.$inferSelect): Promise<{ succe
             .returning();
 
           if (scheduledMsg) {
-            await enqueueJob("send_scheduled_message", { messageId: scheduledMsg.id });
+            await enqueueJob(
+              "send_scheduled_message",
+              { messageId: scheduledMsg.id, tenantId: l.tenantId },
+              { tenantId: l.tenantId }
+            );
             scheduledCount++;
           }
         }

@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
-import { db, messages, suppression } from "./db";
+import { db, leads, messages, suppression } from "./db";
 import { eq, or } from "drizzle-orm";
 import { GoogleGenAI } from "@google/genai";
 import { sendMessage } from "./send-service";
@@ -399,10 +399,23 @@ export async function sendEmailSafely(params: {
     ? draft.recipientEmail
     : process.env.TEST_RECIPIENTS || "kontakt@procentmarketing.pl";
 
-  // 6. Record Message in DB BEFORE physical send
+  // 6. Fetch Lead to get tenantId and record Message in DB BEFORE physical send
+  const [leadRecord] = await db.select({ tenantId: leads.tenantId }).from(leads).where(eq(leads.id, leadId));
+  if (!leadRecord) {
+    return {
+      success: false,
+      messageId: null,
+      errorMessage: `Lead #${leadId} nie został odnaleziony w bazie danych`,
+      wasTestMode: true,
+      recipient: draft.recipientEmail,
+    };
+  }
+  const tenantId = leadRecord.tenantId;
+
   const [createdMessage] = await db
     .insert(messages)
     .values({
+      tenantId,
       leadId,
       direction: "outbound",
       channel: "email",

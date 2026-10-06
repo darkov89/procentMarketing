@@ -504,6 +504,7 @@ export async function sendMessage(
       .where(eq(messages.id, messageId));
 
     await db.insert(leadEvents).values({
+      tenantId: lead.tenantId,
       leadId: lead.id,
       fromStatus: lead.status,
       toStatus: lead.status,

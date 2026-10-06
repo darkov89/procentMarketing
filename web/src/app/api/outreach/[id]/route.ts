@@ -148,6 +148,7 @@ export async function POST(
     const [scheduledMsg] = await db
       .insert(messages)
       .values({
+        tenantId: lead.tenantId,
         leadId,
         direction: "outbound",
         channel: "email",

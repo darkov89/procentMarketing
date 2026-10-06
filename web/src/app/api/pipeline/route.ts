@@ -42,6 +42,7 @@ export async function POST(req: Request) {
           const [createdAudit] = await db
             .insert(audits)
             .values({
+              tenantId: lead.tenantId,
               leadId: lead.id,
               ...auditData,
               auditedAt: new Date(),
@@ -137,6 +138,7 @@ export async function POST(req: Request) {
               const [ev] = await db
                 .insert(evidence)
                 .values({
+                  tenantId: lead.tenantId,
                   leadId: lead.id,
                   claimType: obs.evidenceKey || "audit_finding",
                   claimValue: `${obs.finding} (Wpływ: ${obs.impact})`,
@@ -154,6 +156,7 @@ export async function POST(req: Request) {
           const [createdOffer] = await db
             .insert(offers)
             .values({
+              tenantId: lead.tenantId,
               leadId: lead.id,
               slug: safeSlug,
               token: secureToken,

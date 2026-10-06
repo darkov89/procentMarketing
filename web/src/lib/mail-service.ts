@@ -418,6 +418,7 @@ export async function pollInboxAndProcess(customConfig?: Partial<MailConfig>): P
           await db
             .insert(messages)
             .values({
+              tenantId: matchedLead.tenantId,
               leadId: matchedLead.id,
               direction: "inbound",
               channel: "email",
@@ -453,6 +454,9 @@ export async function pollInboxAndProcess(customConfig?: Partial<MailConfig>): P
             await db
               .insert(suppression)
               .values({
+                tenantId: matchedLead.tenantId,
+                kind: "email",
+                hash: hashedEmail,
                 hashedEmail,
                 rawIdentifier: fromAddress,
                 reason: `Odpowiedź ${classification.classification}: ${classification.reason}`,
@@ -466,6 +470,9 @@ export async function pollInboxAndProcess(customConfig?: Partial<MailConfig>): P
               await db
                 .insert(suppression)
                 .values({
+                  tenantId: matchedLead.tenantId,
+                  kind: "domain",
+                  hash: hashedDomain,
                   hashedDomain,
                   rawIdentifier: domain,
                   reason: `Domena wykluczona po odpowiedzi ${classification.classification}`,

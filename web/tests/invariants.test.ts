@@ -19,6 +19,7 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
     const [fLead] = await db
       .insert(leads)
       .values({
+        tenantId: 1,
         companyName: "INVARIANT 1 FIXTURE TEST CO",
         nip: "9999999999",
         emailPrimary: "fixture-invariant@procentmarketing.pl",
@@ -36,6 +37,7 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
     const [fMsg] = await db
       .insert(messages)
       .values({
+        tenantId: 1,
         leadId: fixtureLeadId,
         channel: "email",
         direction: "outbound",
@@ -53,6 +55,7 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
     const [nLead] = await db
       .insert(leads)
       .values({
+        tenantId: 1,
         companyName: "NORMAL TEST CO FOR INVARIANTS",
         nip: "8888888888",
         emailPrimary: "normal-test@procentmarketing.pl",
@@ -70,6 +73,7 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
     const [nMsg] = await db
       .insert(messages)
       .values({
+        tenantId: 1,
         leadId: normalLeadId,
         channel: "email",
         direction: "outbound",
@@ -151,6 +155,7 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
       const [suppLead] = await db
         .insert(leads)
         .values({
+          tenantId: 1,
           companyName: "SUPPRESSED TEST CO",
           nip: "7777777777",
           emailPrimary: suppressedEmail,
@@ -167,6 +172,7 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
       const [suppMsg] = await db
         .insert(messages)
         .values({
+          tenantId: 1,
           leadId: suppLead.id,
           channel: "email",
           direction: "outbound",
@@ -182,6 +188,9 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
       const [supp] = await db
         .insert(suppression)
         .values({
+          tenantId: 1,
+          kind: "email",
+          hash: hashedEmail,
           hashedEmail,
           rawIdentifier: suppressedEmail,
           reason: "Wypisany z bazy w teście",
@@ -205,6 +214,7 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
       const [termLead] = await db
         .insert(leads)
         .values({
+          tenantId: 1,
           companyName: "TERMINAL LEAD TEST CO",
           nip: "6666666666",
           emailPrimary: "terminal-lead@procentmarketing.pl",
@@ -221,6 +231,7 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
       const [termMsg] = await db
         .insert(messages)
         .values({
+          tenantId: 1,
           leadId: termLead.id,
           channel: "email",
           direction: "outbound",
@@ -306,6 +317,7 @@ describe("System Core Invariants (Invariants 1, 2, 5, 6, 7)", () => {
       const [excessMsg] = await db
         .insert(messages)
         .values({
+          tenantId: 1,
           leadId: normalLeadId,
           channel: "email",
           direction: "outbound",

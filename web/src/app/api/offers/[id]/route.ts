@@ -85,6 +85,7 @@ export async function POST(
         const [ev] = await db
           .insert(evidence)
           .values({
+            tenantId: lead.tenantId,
             leadId,
             claimType: obs.evidenceKey || "audit_finding",
             claimValue: `${obs.finding} (Wpływ: ${obs.impact})`,
@@ -134,6 +135,7 @@ export async function POST(
       const [created] = await db
         .insert(offers)
         .values({
+          tenantId: lead.tenantId,
           leadId,
           slug: safeSlug,
           token: secureToken,
@@ -235,6 +237,7 @@ export async function PUT(
 
     // Log modification event in lead_events for full audit trail
     await db.insert(leadEvents).values({
+      tenantId: lead.tenantId,
       leadId,
       fromStatus: lead.status,
       toStatus: lead.status,

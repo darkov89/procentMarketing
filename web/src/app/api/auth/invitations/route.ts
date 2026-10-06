@@ -78,6 +78,13 @@ export async function POST(req: Request) {
       );
     }
 
+    if (!currentUser.tenantId) {
+      return NextResponse.json(
+        { success: false, error: "Brak aktywnego kontekstu organizacji (tenantId)" },
+        { status: 403 }
+      );
+    }
+
     const body = await req.json();
     const { email, role = "member" } = body;
 
@@ -141,6 +148,7 @@ export async function POST(req: Request) {
     const [newInvite] = await db
       .insert(invitations)
       .values({
+        tenantId: currentUser.tenantId,
         code,
         email: cleanEmail,
         role: role === "admin" ? "admin" : "member",

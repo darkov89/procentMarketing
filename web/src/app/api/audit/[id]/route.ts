@@ -49,6 +49,7 @@ export async function POST(
           .where(eq(audits.id, lead.audit.id));
       } else {
         await db.insert(audits).values({
+          tenantId: lead.tenantId,
           leadId,
           ...auditData,
           auditedAt: new Date(),

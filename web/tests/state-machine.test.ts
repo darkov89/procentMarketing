@@ -78,6 +78,7 @@ describe("Lead State Machine Invariants (Invariant 3)", () => {
       const [inserted] = await db
         .insert(leads)
         .values({
+          tenantId: 1,
           companyName: "STATE MACHINE TEST FIXTURE SP Z O O",
           nip: "1111111111",
           emailPrimary: "fixture@state-machine-test.pl",
