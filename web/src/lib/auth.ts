@@ -14,6 +14,8 @@ export interface SafeUser {
   tenantId?: number;
   tenantSlug?: string;
   tenantName?: string;
+  tenantRole?: string;
+  capabilities?: string[];
   createdAt?: Date;
 }
 
@@ -146,7 +148,13 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
     const user = result[0];
 
     // Resolve tenant membership strictly from database
-    let tenantInfo: { tenantId?: number; tenantSlug?: string; tenantName?: string } = {};
+    let tenantInfo: {
+      tenantId?: number;
+      tenantSlug?: string;
+      tenantName?: string;
+      tenantRole?: string;
+      capabilities?: string[];
+    } = {};
 
     try {
       const membership = await db
@@ -154,6 +162,8 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
           tenantId: tenants.id,
           tenantSlug: tenants.slug,
           tenantName: tenants.name,
+          tenantRole: tenantMembers.role,
+          capabilities: tenantMembers.capabilities,
         })
         .from(tenantMembers)
         .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
@@ -177,6 +187,8 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
       tenantId: tenantInfo.tenantId,
       tenantSlug: tenantInfo.tenantSlug,
       tenantName: tenantInfo.tenantName,
+      tenantRole: tenantInfo.tenantRole,
+      capabilities: tenantInfo.capabilities || [],
       createdAt: user.createdAt,
     };
   } catch (err) {
@@ -249,4 +261,51 @@ export async function requireTenant(): Promise<{ user: SafeUser; tenantId: numbe
   }
   return { user, tenantId: user.tenantId };
 }
+
+export const ROLE_DEFAULT_CAPABILITIES: Record<string, string[]> = {
+  owner: ["*"],
+  admin: [
+    "approve_batch",
+    "manage_playbook",
+    "manage_mailbox",
+    "manage_team",
+    "confirm_payment",
+  ],
+  member: ["approve_batch"],
+  viewer: [],
+};
+
+/**
+ * Checks whether user possesses a specific capability either directly or through tenantRole.
+ */
+export function can(user: SafeUser, capability: string): boolean {
+  if (!user) return false;
+
+  const userCaps = new Set<string>(user.capabilities || []);
+  if (userCaps.has("*") || userCaps.has(capability)) {
+    return true;
+  }
+
+  const role = user.tenantRole || user.role || "viewer";
+  const defaultCaps = ROLE_DEFAULT_CAPABILITIES[role] || [];
+
+  return defaultCaps.includes("*") || defaultCaps.includes(capability);
+}
+
+/**
+ * Guard that verifies both tenant membership and specific capability.
+ * Throws AuthorizationError if user does not possess required capability.
+ */
+export async function requireCapability(
+  capability: string
+): Promise<{ user: SafeUser; tenantId: number }> {
+  const { user, tenantId } = await requireTenant();
+  if (!can(user, capability)) {
+    throw new AuthorizationError(
+      `Brak wymaganego uprawnienia: ${capability}. Skontaktuj się z administratorem.`
+    );
+  }
+  return { user, tenantId };
+}
+
 
