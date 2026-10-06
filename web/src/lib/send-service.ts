@@ -2,10 +2,11 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import nodemailer from "nodemailer";
-import { db, leads, messages, suppression, appSettings, leadEvents } from "@/lib/db";
+import { db, leads, messages, suppression, appSettings, leadEvents, tenants } from "@/lib/db";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { isWithinSendingWindow } from "./polish-calendar";
 import { transitionLead, LeadStatus } from "./state-machine";
+import { scheduleCallTaskAfterEmail, cancelPendingTasksForLead } from "./lead-tasks-service";
 
 export interface SendResult {
   success: boolean;
@@ -35,6 +36,7 @@ export async function isSuppressed(params: {
   nip?: string | null;
   phone?: string | null;
   domain?: string | null;
+  tenantId?: number | null;
 }): Promise<{ suppressed: boolean; reason?: string }> {
   const hashesToCheck: string[] = [];
 
@@ -73,6 +75,15 @@ export async function isSuppressed(params: {
     return { suppressed: false };
   }
 
+  const hashCondition = sql`(${suppression.hashedEmail} IN ${hashesToCheck} OR ${suppression.hashedDomain} IN ${hashesToCheck} OR ${suppression.hashedNip} IN ${hashesToCheck} OR ${suppression.hashedPhone} IN ${hashesToCheck})`;
+
+  const whereClause = params.tenantId
+    ? and(
+        hashCondition,
+        sql`(${suppression.tenantId} = ${params.tenantId} OR ${suppression.tenantId} IS NULL)`
+      )
+    : hashCondition;
+
   const matches = await db
     .select({
       id: suppression.id,
@@ -80,9 +91,7 @@ export async function isSuppressed(params: {
       rawIdentifier: suppression.rawIdentifier,
     })
     .from(suppression)
-    .where(
-      sql`${suppression.hashedEmail} IN ${hashesToCheck} OR ${suppression.hashedDomain} IN ${hashesToCheck} OR ${suppression.hashedNip} IN ${hashesToCheck} OR ${suppression.hashedPhone} IN ${hashesToCheck}`
-    )
+    .where(whereClause)
     .limit(1);
 
   if (matches.length > 0) {
@@ -96,22 +105,26 @@ export async function isSuppressed(params: {
 }
 
 /**
- * Count actual live sent messages today in Warsaw timezone
+ * Count actual live sent messages today in Warsaw timezone (scoped by tenant)
  */
-export async function getLiveMessagesSentTodayCount(): Promise<number> {
+export async function getLiveMessagesSentTodayCount(tenantId?: number | null): Promise<number> {
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
+
+  const conditions = [
+    eq(messages.direction, "outbound"),
+    eq(messages.status, "sent"),
+    gte(messages.sentAt, startOfDay),
+  ];
+
+  if (tenantId) {
+    conditions.push(eq(messages.tenantId, tenantId));
+  }
 
   const [row] = await db
     .select({ count: sql<number>`count(*)` })
     .from(messages)
-    .where(
-      and(
-        eq(messages.direction, "outbound"),
-        eq(messages.status, "sent"),
-        gte(messages.sentAt, startOfDay)
-      )
-    );
+    .where(and(...conditions));
 
   return Number(row?.count || 0);
 }
@@ -335,6 +348,7 @@ export async function sendMessage(
     nip: lead.nip,
     phone: lead.phoneNormalized,
     domain: lead.website,
+    tenantId: lead.tenantId,
   });
 
   if (suppCheck.suppressed) {
@@ -382,15 +396,29 @@ export async function sendMessage(
   }
 
   // -------------------------------------------------------------
-  // 11 & 12. DAILY LIMIT & RAMP LIMIT
+  // 11 & 12. DAILY LIMIT & RAMP LIMIT (Scoped to Tenant)
   // -------------------------------------------------------------
   if (isTrulyLive) {
-    const liveSentToday = await getLiveMessagesSentTodayCount();
-    const settingsVal = liveSettingsRow?.value as Record<string, unknown> | undefined;
-    const configuredLimit = Math.min(
-      typeof settingsVal?.daily_limit === "number" ? settingsVal.daily_limit : DEFAULT_DAILY_LIMIT,
-      MAX_DAILY_LIMIT
-    );
+    const liveSentToday = await getLiveMessagesSentTodayCount(lead.tenantId);
+    let configuredLimit = DEFAULT_DAILY_LIMIT;
+
+    if (lead.tenantId) {
+      const tenantRow = await db.query.tenants.findFirst({
+        where: eq(tenants.id, lead.tenantId),
+      });
+      const tModules = tenantRow?.enabledModules as any;
+      if (typeof tModules?.maxDailySends === "number") {
+        configuredLimit = tModules.maxDailySends;
+      } else {
+        const settingsVal = liveSettingsRow?.value as Record<string, unknown> | undefined;
+        configuredLimit = typeof settingsVal?.daily_limit === "number" ? settingsVal.daily_limit : DEFAULT_DAILY_LIMIT;
+      }
+    } else {
+      const settingsVal = liveSettingsRow?.value as Record<string, unknown> | undefined;
+      configuredLimit = typeof settingsVal?.daily_limit === "number" ? settingsVal.daily_limit : DEFAULT_DAILY_LIMIT;
+    }
+
+    configuredLimit = Math.min(configuredLimit, MAX_DAILY_LIMIT);
 
     if (liveSentToday >= configuredLimit) {
       return {
@@ -512,6 +540,18 @@ export async function sendMessage(
       metadata: { messageId, error: errorMsg, canRetry },
     });
 
+    if (lead.tenantId) {
+      try {
+        await cancelPendingTasksForLead({
+          tenantId: lead.tenantId,
+          leadId: lead.id,
+          reason: `Błąd wysyłki SMTP: ${errorMsg}`,
+        });
+      } catch (cancelErr) {
+        console.warn("Could not cancel tasks on send failure:", cancelErr);
+      }
+    }
+
     return {
       success: false,
       messageId,
@@ -546,6 +586,19 @@ export async function sendMessage(
       actor: "system:sendMessage",
       metadata: { messageId, smtpMessageId, step: nextStep },
     });
+  }
+
+  // Schedule follow-up phone task if tenant module enabled & PKE allows
+  if (lead.tenantId) {
+    try {
+      await scheduleCallTaskAfterEmail({
+        tenantId: lead.tenantId,
+        leadId: lead.id,
+        sentAt: now,
+      });
+    } catch (schedErr) {
+      console.warn("Could not schedule call task after email:", schedErr);
+    }
   }
 
   return {

@@ -56,9 +56,16 @@ import {
   ArrowUp,
   ArrowDown,
   Tag,
+  PhoneCall,
+  HeartHandshake,
+  Layers,
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { POLISH_VOIVODESHIPS } from "@/lib/geo";
+import { TenantSwitcher } from "@/components/TenantSwitcher";
+import { TasksQueueTab } from "@/components/TasksQueueTab";
+import { DealsFinanceTab } from "@/components/DealsFinanceTab";
+import { SuperAdminTenantsTab } from "@/components/SuperAdminTenantsTab";
 
 interface LeadItem {
   id: number;
@@ -83,6 +90,11 @@ interface LeadItem {
   offer?: any;
   contacts?: any[];
   messages?: any[];
+  csrPriority?: number | null;
+  pkeEmailStatus?: "allowed" | "blocked" | "needs_check" | null;
+  pkePhoneStatus?: "allowed" | "blocked" | "needs_check" | null;
+  evidenceUrl?: string | null;
+  evidenceDate?: string | null;
 }
 
 function getEmailPreview(lead: LeadItem) {
@@ -140,9 +152,19 @@ export default function LeadMachineDashboard() {
   const [search, setSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [activeTab, setActiveTab] = useState<"crm" | "generator" | "outreach" | "history" | "review" | "import" | "settings" | "team">("crm");
-
-  // CRM Data Grid: Multiselect, Bulk Actions, Sorting & Pagination
+  const [activeTab, setActiveTab] = useState<
+    | "crm"
+    | "generator"
+    | "outreach"
+    | "history"
+    | "review"
+    | "import"
+    | "settings"
+    | "team"
+    | "tasks"
+    | "deals"
+    | "superadmin"
+  >("crm");
   const [selectedCrmLeadIds, setSelectedCrmLeadIds] = useState<number[]>([]);
   const [bulkProcessing, setBulkProcessing] = useState<{ active: boolean; label: string; current: number; total: number } | null>(null);
   const [bulkStatusModal, setBulkStatusModal] = useState<boolean>(false);
@@ -204,6 +226,16 @@ export default function LeadMachineDashboard() {
     tenantId?: number;
     tenantSlug?: string;
     tenantName?: string;
+    tenantModules?: {
+      compliancePke: boolean;
+      callTasksQueue: boolean;
+      dealFinanceTracking: boolean;
+      offersStudio: boolean;
+      emailOutreach: boolean;
+      outreachMode: string;
+      maxDailySends: number;
+      excludedIndustries: string[];
+    };
   } | null>(null);
   const [invitationsList, setInvitationsList] = useState<any[]>([]);
   const [teamUsersList, setTeamUsersList] = useState<any[]>([]);
@@ -463,6 +495,15 @@ export default function LeadMachineDashboard() {
         setCurrentUser(data.user);
       }
     } catch {}
+  };
+
+  // Switch Active Tenant Callback
+  const handleTenantSwitched = async (tenantId: number) => {
+    await fetchCurrentUser();
+    await fetchLeads();
+    setCurrentPage(1);
+    setSelectedCrmLeadIds([]);
+    setSelectedLead(null);
   };
 
   // Fetch Invitations and Team
@@ -2147,6 +2188,12 @@ export default function LeadMachineDashboard() {
                       { id: "outreach", label: "Zatwierdzanie Ofert", icon: ShieldCheck, badge: pendingApprovalLeads.length, highlight: pendingApprovalLeads.length > 0 },
                       { id: "history", label: "Baza Wysłanych & KPI", icon: History, badge: historyMetrics?.totalOutreached || 0 },
                       { id: "review", label: "Weryfikacja AI", icon: AlertTriangle, badge: metrics.needsReview },
+                      ...(currentUser?.tenantModules?.callTasksQueue
+                        ? [{ id: "tasks", label: "Kolejka Rozmów (Dawid)", icon: PhoneCall, highlight: true }]
+                        : []),
+                      ...(currentUser?.tenantModules?.dealFinanceTracking
+                        ? [{ id: "deals", label: "Wpłaty & Finanse (Ania)", icon: HeartHandshake }]
+                        : []),
                     ].map((item) => {
                       const Icon = item.icon;
                       const isActive = activeTab === item.id;
@@ -2228,6 +2275,9 @@ export default function LeadMachineDashboard() {
                     {[
                       { id: "settings", label: "Ustawienia & Reguły", icon: SettingsIcon },
                       { id: "team", label: "Zespół & Dostęp", icon: Users },
+                      ...((currentUser?.role === "admin" || currentUser?.role === "superadmin")
+                        ? [{ id: "superadmin", label: "Tenants & Moduły", icon: Layers }]
+                        : []),
                     ].map((item) => {
                       const Icon = item.icon;
                       const isActive = activeTab === item.id;
@@ -2342,6 +2392,12 @@ export default function LeadMachineDashboard() {
                   { id: "outreach", label: "Zatwierdzanie Ofert", icon: ShieldCheck, badge: pendingApprovalLeads.length, highlight: pendingApprovalLeads.length > 0 },
                   { id: "history", label: "Baza Wysłanych", icon: History, badge: historyMetrics?.totalOutreached || 0 },
                   { id: "review", label: "Weryfikacja AI", icon: AlertTriangle, badge: metrics.needsReview },
+                  ...(currentUser?.tenantModules?.callTasksQueue
+                    ? [{ id: "tasks", label: "Kolejka Rozmów (Dawid)", icon: PhoneCall, highlight: true }]
+                    : []),
+                  ...(currentUser?.tenantModules?.dealFinanceTracking
+                    ? [{ id: "deals", label: "Wpłaty & Finanse (Ania)", icon: HeartHandshake }]
+                    : []),
                 ].map((item) => {
                   const Icon = item.icon;
                   const isActive = activeTab === item.id;
@@ -2429,6 +2485,9 @@ export default function LeadMachineDashboard() {
                 {[
                   { id: "settings", label: "Ustawienia & Reguły", icon: SettingsIcon },
                   { id: "team", label: "Zespół & Dostęp", icon: Users },
+                  ...((currentUser?.role === "admin" || currentUser?.role === "superadmin")
+                    ? [{ id: "superadmin", label: "Tenants & Moduły", icon: Layers }]
+                    : []),
                 ].map((item) => {
                   const Icon = item.icon;
                   const isActive = activeTab === item.id;
@@ -2511,12 +2570,18 @@ export default function LeadMachineDashboard() {
                 {activeTab === "review" && "Kolejka Spraw Granicznych (Needs Review)"}
                 {activeTab === "settings" && "Konfiguracja Systemu, Poczty & AI"}
                 {activeTab === "team" && "Zarządzanie Zespołem & Zaproszenia"}
+                {activeTab === "tasks" && "Kolejka Rozmów Telefonicznych (Dawid)"}
+                {activeTab === "deals" && "Program „Firmy Dzieciom” — Wpłaty & Finanse"}
+                {activeTab === "superadmin" && "Multi-Tenant Module Governance"}
               </h2>
-              {currentUser?.tenantName && (
-                <span className="text-[11px] bg-[#141C2E] border border-[#38BDF8]/40 text-[#38BDF8] font-bold px-2.5 py-0.5 rounded-full">
-                  Organizacja: {currentUser.tenantName}
-                </span>
-              )}
+              <TenantSwitcher
+                currentTenantId={currentUser?.tenantId}
+                currentTenantName={currentUser?.tenantName}
+                userRole={currentUser?.role}
+                onTenantSwitched={handleTenantSwitched}
+                onOpenSuperAdmin={() => setActiveTab("superadmin")}
+                showToast={showToast}
+              />
             </div>
 
             <div className="flex items-center gap-2.5">
@@ -2970,6 +3035,20 @@ export default function LeadMachineDashboard() {
                                         {lead.scoreBreakdown.companyScale === "mikro" ? "MIKRO" : lead.scoreBreakdown.companyScale === "male" ? "MAŁA" : "MŚP"}
                                       </span>
                                     )}
+                                    {lead.csrPriority != null && (
+                                      <span
+                                        className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-extrabold uppercase border ${
+                                          lead.csrPriority === 1
+                                            ? "bg-emerald-950 text-emerald-300 border-emerald-700"
+                                            : lead.csrPriority === 2
+                                            ? "bg-sky-950 text-sky-300 border-sky-700"
+                                            : "bg-amber-950 text-amber-300 border-amber-700"
+                                        }`}
+                                        title={`CSR Priorytet ${lead.csrPriority}`}
+                                      >
+                                        P{lead.csrPriority} CSR
+                                      </span>
+                                    )}
                                   </div>
                                   {lead.website && (
                                     <a
@@ -3102,7 +3181,19 @@ export default function LeadMachineDashboard() {
                                 </div>
                               ) : (
                                 <div>
-                                  <div className="font-mono text-white">{lead.phoneNormalized || "—"}</div>
+                                  <div className="font-mono text-white flex items-center gap-1.5 flex-wrap">
+                                    <span>{lead.phoneNormalized || "—"}</span>
+                                    {lead.pkePhoneStatus === "allowed" && (
+                                      <span className="text-[9px] bg-emerald-950 text-emerald-300 border border-emerald-800 px-1 py-0.2 rounded font-mono font-bold">
+                                        PKE OK
+                                      </span>
+                                    )}
+                                    {lead.pkePhoneStatus === "blocked" && (
+                                      <span className="text-[9px] bg-rose-950 text-rose-300 border border-rose-800 px-1 py-0.2 rounded font-mono font-bold">
+                                        Brak zgody tel
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-[#94A3B8] truncate max-w-[150px]">{lead.emailPrimary || "—"}</div>
                                 </div>
                               )}
@@ -3604,9 +3695,9 @@ export default function LeadMachineDashboard() {
               </div>
 
               {/* Form Controls Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 pt-1">
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5 pt-1 items-start">
+                <div className="flex flex-col">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5 h-4 truncate">
                     Województwo
                   </label>
                   <select
@@ -3620,7 +3711,7 @@ export default function LeadMachineDashboard() {
                         setScraperCity(def.capital);
                       }
                     }}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    className="w-full h-[42px] bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   >
                     {POLISH_VOIVODESHIPS.map((voiv) => (
                       <option key={voiv.name} value={voiv.name}>
@@ -3631,8 +3722,8 @@ export default function LeadMachineDashboard() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                <div className="flex flex-col">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5 h-4 truncate" title="Centrum Poszukiwań (Miasto)">
                     Centrum Poszukiwań (Miasto)
                   </label>
                   <select
@@ -3645,7 +3736,7 @@ export default function LeadMachineDashboard() {
                         setScraperCity(e.target.value);
                       }
                     }}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    className="w-full h-[42px] bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   >
                     {currentVoivodeshipCities.map((c) => (
                       <option key={c} value={c}>
@@ -3660,22 +3751,22 @@ export default function LeadMachineDashboard() {
                       value={scraperCustomCity}
                       onChange={(e) => setScraperCustomCity(e.target.value)}
                       placeholder="Wpisz dowolne miasto..."
-                      className="w-full mt-2 bg-[#0A0E17] border border-[#FFE600] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none"
+                      className="w-full mt-2 h-[34px] bg-[#0A0E17] border border-[#FFE600] rounded-lg px-3 text-xs text-white focus:outline-none"
                       autoFocus
                     />
                   )}
                 </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-bold uppercase tracking-wider text-[#94A3B8]">
+                <div className="flex flex-col">
+                  <div className="flex items-center justify-between mb-1.5 h-4">
+                    <label className="text-xs font-bold uppercase tracking-wider text-[#94A3B8] truncate">
                       Maks. promień
                     </label>
-                    <span className="font-extrabold text-xs text-[#FFE600]">
+                    <span className="font-extrabold text-xs text-[#FFE600] ml-1 shrink-0">
                       {scraperRadius > 0 ? `${scraperRadius} km` : "Bez limitu"}
                     </span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2.5 h-[42px] px-3 bg-[#0A0E17] border border-[#28354D] rounded-lg">
                     <input
                       type="range"
                       min={0}
@@ -3683,15 +3774,15 @@ export default function LeadMachineDashboard() {
                       step={5}
                       value={scraperRadius}
                       onChange={(e) => setScraperRadius(parseInt(e.target.value, 10))}
-                      className="flex-1 accent-[#FFE600]"
+                      className="flex-1 accent-[#FFE600] cursor-pointer"
                     />
                     <button
                       type="button"
                       onClick={() => setScraperRadius(scraperRadius === 0 ? 35 : 0)}
-                      className={`text-[10px] font-bold px-2 py-1 rounded border transition-all ${
+                      className={`text-[10px] font-bold px-2 py-1 rounded border transition-all cursor-pointer shrink-0 ${
                         scraperRadius === 0
                           ? "bg-[#FFE600] text-black border-[#FFE600]"
-                          : "bg-[#0A0E17] text-[#94A3B8] border-[#28354D]"
+                          : "bg-[#1E293B] text-[#94A3B8] border-[#334155] hover:text-white"
                       }`}
                     >
                       {scraperRadius === 0 ? "Bez limitu" : "Cała PL"}
@@ -3699,14 +3790,14 @@ export default function LeadMachineDashboard() {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                <div className="flex flex-col">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5 h-4 truncate" title="Wielkość Przedsiębiorstwa">
                     Wielkość Przedsiębiorstwa
                   </label>
                   <select
                     value={scraperCompanyScale}
                     onChange={(e) => setScraperCompanyScale(e.target.value as any)}
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    className="w-full h-[42px] bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   >
                     <option value="mikro">Mikro (CEIDG / JDG)</option>
                     <option value="male">Małe (KRS / Sp. z o.o.)</option>
@@ -3714,8 +3805,8 @@ export default function LeadMachineDashboard() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5">
+                <div className="flex flex-col">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1.5 h-4 truncate" title="Branża (opcjonalnie)">
                     Branża (opcjonalnie)
                   </label>
                   <input
@@ -3723,7 +3814,7 @@ export default function LeadMachineDashboard() {
                     value={scraperKeyword}
                     onChange={(e) => setScraperKeyword(e.target.value)}
                     placeholder="Wszystkie branże"
-                    className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                    className="w-full h-[42px] bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                   />
                 </div>
               </div>
@@ -4918,9 +5009,9 @@ export default function LeadMachineDashboard() {
                 <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600] flex items-center gap-1.5">
                   <MapPin size={14} /> 1. Region Geograficzny & Centrum Poszukiwań
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
+                  <div className="flex flex-col">
+                    <label className="block text-xs font-bold text-[#94A3B8] mb-1.5 h-4 truncate">
                       Województwo / Obszar
                     </label>
                     <select
@@ -4936,7 +5027,7 @@ export default function LeadMachineDashboard() {
                         });
                         setIsTargetCustomCity(false);
                       }}
-                      className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                      className="w-full h-[42px] bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                     >
                       {POLISH_VOIVODESHIPS.map((voiv) => (
                         <option key={voiv.name} value={voiv.name}>
@@ -4947,8 +5038,8 @@ export default function LeadMachineDashboard() {
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-[#94A3B8] mb-1">
+                  <div className="flex flex-col">
+                    <label className="block text-xs font-bold text-[#94A3B8] mb-1.5 h-4 truncate">
                       Domyślne Miasto Centrum
                     </label>
                     <select
@@ -4961,7 +5052,7 @@ export default function LeadMachineDashboard() {
                           setTargetingSettings({ ...targetingSettings, defaultCity: e.target.value });
                         }
                       }}
-                      className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-[#FFE600]"
+                      className="w-full h-[42px] bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 text-sm text-white focus:outline-none focus:border-[#FFE600]"
                     >
                       {currentTargetingCities.map((c) => (
                         <option key={c} value={c}>
@@ -4978,20 +5069,20 @@ export default function LeadMachineDashboard() {
                           setTargetingSettings({ ...targetingSettings, defaultCity: e.target.value })
                         }
                         placeholder="Wpisz dowolne miasto w Polsce..."
-                        className="w-full mt-2 bg-[#0A0E17] border border-[#FFE600] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none"
+                        className="w-full mt-2 h-[34px] bg-[#0A0E17] border border-[#FFE600] rounded-lg px-3 text-xs text-white focus:outline-none"
                         autoFocus
                       />
                     )}
                   </div>
 
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-bold text-[#94A3B8]">Domyślny Promień (km)</label>
-                      <span className="font-extrabold text-xs text-[#FFE600]">
+                  <div className="flex flex-col">
+                    <div className="flex items-center justify-between mb-1.5 h-4">
+                      <label className="text-xs font-bold text-[#94A3B8] truncate">Domyślny Promień (km)</label>
+                      <span className="font-extrabold text-xs text-[#FFE600] ml-1 shrink-0">
                         {targetingSettings.defaultRadiusKm > 0 ? `${targetingSettings.defaultRadiusKm} km` : "Bez limitu"}
                       </span>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-2.5 h-[42px] px-3 bg-[#0A0E17] border border-[#28354D] rounded-lg">
                       <input
                         type="range"
                         min={0}
@@ -5004,7 +5095,7 @@ export default function LeadMachineDashboard() {
                             defaultRadiusKm: parseInt(e.target.value, 10),
                           })
                         }
-                        className="flex-1 accent-[#FFE600]"
+                        className="flex-1 accent-[#FFE600] cursor-pointer"
                       />
                       <button
                         type="button"
@@ -5014,13 +5105,13 @@ export default function LeadMachineDashboard() {
                             defaultRadiusKm: targetingSettings.defaultRadiusKm === 0 ? 35 : 0,
                           })
                         }
-                        className={`text-[10px] font-bold px-2 py-1 rounded border transition-all ${
+                        className={`text-[10px] font-bold px-2 py-1 rounded border transition-all cursor-pointer shrink-0 ${
                           targetingSettings.defaultRadiusKm === 0
                             ? "bg-[#FFE600] text-black border-[#FFE600]"
-                            : "bg-[#0A0E17] text-[#94A3B8] border-[#28354D]"
+                            : "bg-[#1E293B] text-[#94A3B8] border-[#334155] hover:text-white"
                         }`}
                       >
-                        {targetingSettings.defaultRadiusKm === 0 ? "Bez limitu km" : "Cała PL"}
+                        {targetingSettings.defaultRadiusKm === 0 ? "Bez limitu" : "Cała PL"}
                       </button>
                     </div>
                   </div>
@@ -5965,6 +6056,34 @@ export default function LeadMachineDashboard() {
             </div>
           </div>
         )}
+
+        {/* TAB: TASKS QUEUE (DAWID) */}
+        {activeTab === "tasks" && (
+          <TasksQueueTab
+            showToast={showToast}
+            onNavigateToDeals={() => {
+              setActiveTab("deals");
+            }}
+          />
+        )}
+
+        {/* TAB: DEALS & FINANCE TRACKING (ANIA) */}
+        {activeTab === "deals" && (
+          <DealsFinanceTab
+            leads={leads}
+            showToast={showToast}
+            currentUser={currentUser}
+          />
+        )}
+
+        {/* TAB: SUPER ADMIN TENANTS & MODULES */}
+        {activeTab === "superadmin" && (
+          <SuperAdminTenantsTab
+            currentTenantId={currentUser?.tenantId}
+            showToast={showToast}
+            onTenantSwitched={handleTenantSwitched}
+          />
+        )}
       </main>
       </div>
 
@@ -6074,6 +6193,69 @@ export default function LeadMachineDashboard() {
                     </div>
                   </div>
                 </div>
+
+                {/* Weryfikacja Sponsoringu CSR & Zgody PKE (Art. 398) */}
+                {(selectedLead.csrPriority != null || selectedLead.pkePhoneStatus || selectedLead.evidenceUrl) && (
+                  <div className="bg-[#141C2E] p-4 rounded-xl border border-emerald-500/40 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
+                        <HeartHandshake size={15} className="text-[#34D399]" /> Weryfikacja Sponsoringu CSR & Zgody PKE
+                      </span>
+                      {selectedLead.csrPriority != null && (
+                        <span
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded font-black uppercase border ${
+                            selectedLead.csrPriority === 1
+                              ? "bg-emerald-950 text-emerald-300 border-emerald-700"
+                              : selectedLead.csrPriority === 2
+                              ? "bg-sky-950 text-sky-300 border-sky-700"
+                              : "bg-amber-950 text-amber-300 border-amber-700"
+                          }`}
+                        >
+                          Priorytet {selectedLead.csrPriority} CSR
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                      <div className="bg-[#0A0E17] p-2.5 rounded-lg border border-[#1E293B]">
+                        <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Art. 398 PKE — E-mail</span>
+                        <span className="font-extrabold text-white">
+                          {selectedLead.pkeEmailStatus === "allowed" ? "✅ Dopuszczony" : "⚠️ Do weryfikacji"}
+                        </span>
+                        <span className="block text-[10px] text-[#64748B] mt-0.5">Wymóg klauzuli informacyjnej</span>
+                      </div>
+
+                      <div className="bg-[#0A0E17] p-2.5 rounded-lg border border-[#1E293B]">
+                        <span className="text-[#94A3B8] block text-[10px] uppercase font-bold">Art. 398 PKE — Telefon</span>
+                        <span className={`font-extrabold ${selectedLead.pkePhoneStatus === "allowed" ? "text-emerald-400" : selectedLead.pkePhoneStatus === "blocked" ? "text-rose-400" : "text-amber-400"}`}>
+                          {selectedLead.pkePhoneStatus === "allowed" ? "📞 Zgoda telefoniczna OK" : selectedLead.pkePhoneStatus === "blocked" ? "🚫 Brak zgody na telefon" : "⏳ Do sprawdzenia"}
+                        </span>
+                        <span className="block text-[10px] text-[#64748B] mt-0.5">Zakaz cold call bez zgody</span>
+                      </div>
+                    </div>
+
+                    {selectedLead.evidenceUrl && (
+                      <div className="text-[11px] text-[#94A3B8] pt-2 border-t border-[#1E293B] space-y-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-white font-bold">Dowód dopasowania CSR:</span>
+                          <a
+                            href={selectedLead.evidenceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[#38BDF8] underline flex items-center gap-1 hover:text-white"
+                          >
+                            <ExternalLink size={11} /> {selectedLead.evidenceUrl}
+                          </a>
+                        </div>
+                        {selectedLead.evidenceDate && (
+                          <div className="text-[10px] text-[#64748B] font-mono">
+                            Data publikacji dowodu: {selectedLead.evidenceDate}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Weryfikacja w Rejestrach Państwowych (Biała Lista MF / KRS / CEIDG) */}
                 <div className="bg-[#141C2E] p-4 rounded-xl border border-[#28354D] space-y-3">

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { tenants, tenantMembers, leads, offers, messages } from "../src/lib/db/schema";
+import { tenants, tenantMembers, leads, offers, messages, leadTasks, leadDeals } from "../src/lib/db/schema";
 
 describe("Multi-Tenant & Outreach History Invariants", () => {
   it("verifies multi-tenant schema tables and columns are defined", () => {
@@ -9,6 +9,7 @@ describe("Multi-Tenant & Outreach History Invariants", () => {
     assert.ok(tenants.name);
     assert.ok(tenants.plan);
     assert.ok(tenants.isActive);
+    assert.ok(tenants.enabledModules);
 
     assert.ok(tenantMembers.id);
     assert.ok(tenantMembers.tenantId);
@@ -16,10 +17,26 @@ describe("Multi-Tenant & Outreach History Invariants", () => {
     assert.ok(tenantMembers.role);
 
     assert.ok(leads.tenantId);
+    assert.ok(leads.pkeEmailStatus);
+    assert.ok(leads.pkePhoneStatus);
+    assert.ok(leads.csrPriority);
+    assert.ok(leads.evidenceUrl);
     assert.ok(offers.tenantId);
     assert.ok(messages.tenantId);
     assert.ok(offers.viewCount);
     assert.ok(offers.lastViewedAt);
+
+    assert.ok(leadTasks.id);
+    assert.ok(leadTasks.tenantId);
+    assert.ok(leadTasks.leadId);
+    assert.ok(leadTasks.dueAt);
+    assert.ok(leadTasks.taskType);
+
+    assert.ok(leadDeals.id);
+    assert.ok(leadDeals.tenantId);
+    assert.ok(leadDeals.leadId);
+    assert.ok(leadDeals.declaredAmount);
+    assert.ok(leadDeals.paidAmount);
   });
 
   it("calculates tenant outreach KPIs correctly from history array", () => {

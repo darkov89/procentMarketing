@@ -11,12 +11,35 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
+export interface TenantModulesConfig {
+  sourcingPlaces?: boolean;
+  sourcingCsv?: boolean;
+  compliancePke?: boolean;
+  outreachMode?: "plain" | "offer_page";
+  callTasksQueue?: boolean;
+  dealFinanceTracking?: boolean;
+  excludedIndustries?: string[];
+  maxDailySends?: number;
+}
+
+export const DEFAULT_TENANT_MODULES: TenantModulesConfig = {
+  sourcingPlaces: true,
+  sourcingCsv: true,
+  compliancePke: false,
+  outreachMode: "offer_page",
+  callTasksQueue: false,
+  dealFinanceTracking: false,
+  excludedIndustries: [],
+  maxDailySends: 15,
+};
+
 export const tenants = pgTable("tenants", {
   id: serial("id").primaryKey(),
   slug: varchar("slug", { length: 50 }).unique().notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   plan: varchar("plan", { length: 50 }).default("pro").notNull(),
   isActive: boolean("is_active").default(true).notNull(),
+  enabledModules: json("enabled_modules").$type<TenantModulesConfig>().default(DEFAULT_TENANT_MODULES).notNull(),
   createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
 });
@@ -62,6 +85,11 @@ export const leads = pgTable("leads", {
   lostReason: varchar("lost_reason", { length: 100 }),
   cooldownUntil: timestamp("cooldown_until", { withTimezone: false }),
   contactBasis: varchar("contact_basis", { length: 50 }).default("inquiry"),
+  pkeEmailStatus: varchar("pke_email_status", { length: 50 }).default("needs_review"),
+  pkePhoneStatus: varchar("pke_phone_status", { length: 50 }).default("needs_review"),
+  csrPriority: integer("csr_priority"),
+  evidenceUrl: text("evidence_url"),
+  evidenceDate: varchar("evidence_date", { length: 50 }),
   isFixture: boolean("is_fixture").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
@@ -261,6 +289,48 @@ export const leadEvents = pgTable("lead_events", {
   createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
 });
 
+export const leadTasks = pgTable("lead_tasks", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  leadId: integer("lead_id")
+    .references(() => leads.id, { onDelete: "cascade" })
+    .notNull(),
+  assignedUserId: integer("assigned_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  taskType: varchar("task_type", { length: 50 }).default("call").notNull(),
+  title: varchar("title", { length: 255 }).notNull(),
+  dueAt: timestamp("due_at", { withTimezone: false }).notNull(),
+  status: varchar("status", { length: 50 }).default("pending").notNull(),
+  outcome: varchar("outcome", { length: 100 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: false }),
+});
+
+export const leadDeals = pgTable("lead_deals", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id")
+    .references(() => tenants.id, { onDelete: "cascade" })
+    .notNull(),
+  leadId: integer("lead_id")
+    .references(() => leads.id, { onDelete: "cascade" })
+    .notNull(),
+  declaredAmount: doublePrecision("declared_amount").default(0),
+  expectedPaymentAt: timestamp("expected_payment_at", { withTimezone: false }),
+  paidAmount: doublePrecision("paid_amount").default(0),
+  paidConfirmedAt: timestamp("paid_confirmed_at", { withTimezone: false }),
+  confirmedByUserId: integer("confirmed_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  status: varchar("status", { length: 50 }).default("declared").notNull(),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: false }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: false }).defaultNow().notNull(),
+});
+
 export const jobs = pgTable("jobs", {
   id: serial("id").primaryKey(),
   type: varchar("type", { length: 100 }).notNull(),
@@ -316,6 +386,38 @@ export const leadsRelations = relations(leads, ({ one, many }) => ({
   events: many(events),
   leadEvents: many(leadEvents),
   evidence: many(evidence),
+  tasks: many(leadTasks),
+  deals: many(leadDeals),
+}));
+
+export const leadTasksRelations = relations(leadTasks, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [leadTasks.tenantId],
+    references: [tenants.id],
+  }),
+  lead: one(leads, {
+    fields: [leadTasks.leadId],
+    references: [leads.id],
+  }),
+  assignedUser: one(users, {
+    fields: [leadTasks.assignedUserId],
+    references: [users.id],
+  }),
+}));
+
+export const leadDealsRelations = relations(leadDeals, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [leadDeals.tenantId],
+    references: [tenants.id],
+  }),
+  lead: one(leads, {
+    fields: [leadDeals.leadId],
+    references: [leads.id],
+  }),
+  confirmedByUser: one(users, {
+    fields: [leadDeals.confirmedByUserId],
+    references: [users.id],
+  }),
 }));
 
 export const leadEventsRelations = relations(leadEvents, ({ one }) => ({
@@ -365,6 +467,8 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   leads: many(leads),
   offers: many(offers),
   messages: many(messages),
+  tasks: many(leadTasks),
+  deals: many(leadDeals),
 }));
 
 export const tenantMembersRelations = relations(tenantMembers, ({ one }) => ({

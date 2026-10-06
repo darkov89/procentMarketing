@@ -1,9 +1,10 @@
 import crypto from "crypto";
 import { cookies } from "next/headers";
-import { db, users, invitations, sessions, tenants, tenantMembers } from "@/lib/db";
+import { db, users, invitations, sessions, tenants, tenantMembers, TenantModulesConfig, DEFAULT_TENANT_MODULES } from "@/lib/db";
 import { eq, and, gt } from "drizzle-orm";
 
 export const SESSION_COOKIE_NAME = "pm_session_token";
+export const TENANT_COOKIE_NAME = "pm_active_tenant_id";
 export const BOOTSTRAP_INVITE_CODE = process.env.BOOTSTRAP_INVITE_CODE || "PROCENT-START-2026";
 
 export interface SafeUser {
@@ -14,6 +15,7 @@ export interface SafeUser {
   tenantId?: number;
   tenantSlug?: string;
   tenantName?: string;
+  tenantModules?: TenantModulesConfig;
   createdAt?: Date;
 }
 
@@ -124,7 +126,7 @@ export async function createSession(userId: number): Promise<{ token: string; ex
 /**
  * Validate session token and return user
  */
-export async function validateSessionToken(token: string): Promise<SafeUser | null> {
+export async function validateSessionToken(token: string, requestedTenantId?: number | null): Promise<SafeUser | null> {
   if (!token) return null;
 
   try {
@@ -145,27 +147,92 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
 
     const user = result[0];
 
-    // Resolve tenant membership
+    // Resolve tenant membership and enabled modules
     let tenantInfo = {
       tenantId: 1,
       tenantSlug: "procent-marketing",
       tenantName: "Procent Marketing",
+      enabledModules: DEFAULT_TENANT_MODULES,
     };
 
     try {
-      const membership = await db
-        .select({
-          tenantId: tenants.id,
-          tenantSlug: tenants.slug,
-          tenantName: tenants.name,
-        })
-        .from(tenantMembers)
-        .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
-        .where(eq(tenantMembers.userId, user.id))
-        .limit(1);
+      let resolved = false;
 
-      if (membership.length > 0) {
-        tenantInfo = membership[0];
+      // 1. If requestedTenantId is specified, check if user is authorized (admin/superadmin or member)
+      if (requestedTenantId) {
+        if (user.role === "admin" || user.role === "superadmin") {
+          const targetTenant = await db.query.tenants.findFirst({
+            where: eq(tenants.id, requestedTenantId),
+          });
+          if (targetTenant) {
+            tenantInfo = {
+              tenantId: targetTenant.id,
+              tenantSlug: targetTenant.slug,
+              tenantName: targetTenant.name,
+              enabledModules: (targetTenant.enabledModules as TenantModulesConfig) || DEFAULT_TENANT_MODULES,
+            };
+            resolved = true;
+          }
+        } else {
+          const membership = await db
+            .select({
+              tenantId: tenants.id,
+              tenantSlug: tenants.slug,
+              tenantName: tenants.name,
+              enabledModules: tenants.enabledModules,
+            })
+            .from(tenantMembers)
+            .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
+            .where(and(eq(tenantMembers.userId, user.id), eq(tenantMembers.tenantId, requestedTenantId)))
+            .limit(1);
+
+          if (membership.length > 0) {
+            tenantInfo = {
+              tenantId: membership[0].tenantId,
+              tenantSlug: membership[0].tenantSlug,
+              tenantName: membership[0].tenantName,
+              enabledModules: (membership[0].enabledModules as TenantModulesConfig) || DEFAULT_TENANT_MODULES,
+            };
+            resolved = true;
+          }
+        }
+      }
+
+      // 2. Default to user's primary/first tenant membership if not explicitly resolved
+      if (!resolved) {
+        const membership = await db
+          .select({
+            tenantId: tenants.id,
+            tenantSlug: tenants.slug,
+            tenantName: tenants.name,
+            enabledModules: tenants.enabledModules,
+          })
+          .from(tenantMembers)
+          .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
+          .where(eq(tenantMembers.userId, user.id))
+          .limit(1);
+
+        if (membership.length > 0) {
+          tenantInfo = {
+            tenantId: membership[0].tenantId,
+            tenantSlug: membership[0].tenantSlug,
+            tenantName: membership[0].tenantName,
+            enabledModules: (membership[0].enabledModules as TenantModulesConfig) || DEFAULT_TENANT_MODULES,
+          };
+        } else {
+          // If no membership found, fetch tenant 1
+          const defaultTenant = await db.query.tenants.findFirst({
+            where: eq(tenants.id, 1),
+          });
+          if (defaultTenant) {
+            tenantInfo = {
+              tenantId: defaultTenant.id,
+              tenantSlug: defaultTenant.slug,
+              tenantName: defaultTenant.name,
+              enabledModules: (defaultTenant.enabledModules as TenantModulesConfig) || DEFAULT_TENANT_MODULES,
+            };
+          }
+        }
       }
     } catch {
       // Fallback to default tenant
@@ -179,6 +246,7 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
       tenantId: tenantInfo.tenantId,
       tenantSlug: tenantInfo.tenantSlug,
       tenantName: tenantInfo.tenantName,
+      tenantModules: tenantInfo.enabledModules,
       createdAt: user.createdAt,
     };
   } catch (err) {
@@ -214,7 +282,9 @@ export async function getCurrentUser(): Promise<SafeUser | null> {
     const cookieStore = await cookies();
     const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
     if (!token) return null;
-    return await validateSessionToken(token);
+    const tenantCookie = cookieStore.get(TENANT_COOKIE_NAME)?.value;
+    const requestedTenantId = tenantCookie ? parseInt(tenantCookie, 10) : undefined;
+    return await validateSessionToken(token, requestedTenantId);
   } catch {
     return null;
   }

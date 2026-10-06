@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { db, leads, audits, contacts, appSettings } from "@/lib/db";
-import { eq, or } from "drizzle-orm";
+import { db, leads, audits, contacts, appSettings, tenants } from "@/lib/db";
+import { eq, or, and } from "drizzle-orm";
 import { validateGeo, resolveCityCoordinates } from "@/lib/geo";
 import { normalizePhone, normalizeNip, normalizeDomain } from "@/lib/dedup";
 import { auditWebsite } from "@/lib/auditor";
 import { requireUser } from "@/lib/auth";
 import { searchGooglePlaces } from "@/lib/google-places";
 import { verifyCompanyRegistry } from "@/lib/registries";
+import { isSuppressed } from "@/lib/send-service";
 
 // Resolves Google Maps / Places API key from DB app_settings or environment
 async function getResolvedGoogleApiKey(): Promise<string | undefined> {
@@ -322,8 +323,16 @@ const POLISH_BUSINESS_CATALOG: Record<
 
 export async function POST(req: Request) {
   try {
-    await requireUser();
+    const user = await requireUser();
+    const tenantId = user.tenantId || 1;
     const body = await req.json();
+
+    // Fetch tenant configuration for modules & industry exclusions
+    const tenantRow = await db.query.tenants.findFirst({
+      where: eq(tenants.id, tenantId),
+    });
+    const tenantModules = (tenantRow?.enabledModules as any) || {};
+    const excludedIndustries = (tenantModules.excludedIndustries || []) as string[];
 
     // 1. Direct CSV Import
     if (body.csvItems && Array.isArray(body.csvItems)) {
@@ -332,7 +341,11 @@ export async function POST(req: Request) {
         body.radiusKm !== undefined ? Number(body.radiusKm) : 0,
         "import_csv",
         body.city || "Polska",
-        body.voivodeship || "Dolnośląskie"
+        body.voivodeship || "Dolnośląskie",
+        undefined,
+        tenantId,
+        excludedIndustries,
+        tenantModules
       );
       return NextResponse.json(csvRes);
     }
@@ -459,7 +472,10 @@ export async function POST(req: Request) {
       `scraper_${companyScale}`,
       city,
       voivodeship,
-      centerPoint
+      centerPoint,
+      tenantId,
+      excludedIndustries,
+      tenantModules
     );
 
     return NextResponse.json({
@@ -488,7 +504,10 @@ async function processItems(
   sourceName: string,
   centerCity: string = "Wrocław",
   centerVoivodeship: string = "Dolnośląskie",
-  centerCoordinates?: { lat: number; lon: number }
+  centerCoordinates?: { lat: number; lon: number },
+  tenantId: number = 1,
+  excludedIndustries: string[] = [],
+  tenantModules: any = {}
 ) {
   let addedCount = 0;
   let rejectedRadius = 0;
@@ -498,6 +517,16 @@ async function processItems(
   const addedLeads: Array<any> = [];
 
   for (const item of items) {
+    // 0. Excluded Industries Check (e.g. alkohol, hazard, tytoń)
+    if (excludedIndustries.length > 0) {
+      const textToScan = `${item.companyName || ""} ${item.industry || ""}`.toLowerCase();
+      const isExcluded = excludedIndustries.some((ex) => textToScan.includes(ex.toLowerCase()));
+      if (isExcluded) {
+        rejectedDuplicates++;
+        continue;
+      }
+    }
+
     // 1. Precise Geographic Haversine Distance Check
     const geo = validateGeo({
       city: item.city,
@@ -519,17 +548,34 @@ async function processItems(
     const normDomain = normalizeDomain(item.website);
     const normNip = item.nip ? normalizeNip(item.nip) : null;
 
-    // 2. Duplicate Check in PostgreSQL Database
+    // 2. Duplicate Check in PostgreSQL Database scoped by tenantId
     const existing = await db.query.leads.findFirst({
-      where: or(
-        eq(leads.companyName, item.companyName),
-        normNip ? eq(leads.nip, normNip) : undefined,
-        normPhone ? eq(leads.phoneNormalized, normPhone) : undefined,
-        normDomain ? eq(leads.website, item.website!) : undefined
+      where: and(
+        eq(leads.tenantId, tenantId),
+        or(
+          eq(leads.companyName, item.companyName),
+          normNip ? eq(leads.nip, normNip) : undefined,
+          normPhone ? eq(leads.phoneNormalized, normPhone) : undefined,
+          normDomain ? eq(leads.website, item.website!) : undefined
+        )
       ),
     });
 
     if (existing) {
+      rejectedDuplicates++;
+      continue;
+    }
+
+    // 2b. Suppression Check (Persistent Blocks even on re-import)
+    const supCheck = await isSuppressed({
+      email: item.email || null,
+      phone: normPhone,
+      nip: normNip,
+      domain: normDomain,
+      tenantId,
+    });
+
+    if (supCheck.suppressed) {
       rejectedDuplicates++;
       continue;
     }
@@ -577,6 +623,7 @@ async function processItems(
     const [inserted] = await db
       .insert(leads)
       .values({
+        tenantId,
         companyName: item.companyName,
         nip: verifiedNip,
         regon: verifiedRegon,
@@ -592,6 +639,11 @@ async function processItems(
         status: "new",
         score: isRegistryVerified ? 20 : 10,
         ownerConfidence: verifiedOwnerName ? "high" : "none",
+        pkeEmailStatus: item.pkeEmailStatus || item.email_allowed || (tenantModules.compliancePke ? "needs_review" : "allowed"),
+        pkePhoneStatus: item.pkePhoneStatus || item.phone_allowed || (tenantModules.compliancePke ? "needs_review" : "allowed"),
+        csrPriority: item.csrPriority || (item.priority ? Number(item.priority) : null),
+        evidenceUrl: item.evidenceUrl || item.evidence_url || null,
+        evidenceDate: item.evidenceDate || item.evidence_date || null,
         scoreBreakdown: {
           companyScale: verifiedScale,
           legalForm: verifiedLegalForm,
@@ -611,6 +663,7 @@ async function processItems(
     if (verifiedOwnerName) {
       try {
         await db.insert(contacts).values({
+          tenantId,
           leadId: inserted.id,
           firstName: verifiedOwnerName,
           role: verifiedOwnerRole || "Właściciel / Zarząd",
