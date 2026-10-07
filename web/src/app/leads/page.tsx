@@ -404,16 +404,8 @@ function LeadsPageContent() {
       <ToastNotification toast={toast} />
 
       {/* Top Header */}
-      <header className="bg-[#0E1422] border-b border-[#28354D] px-6 py-4 sticky top-0 z-40 flex items-center justify-between">
+      <header className="bg-[#0E1422] border-b border-[#28354D] px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link
-            href="/"
-            className="flex items-center gap-2 text-xs font-bold text-[#94A3B8] hover:text-white transition-colors"
-          >
-            <ArrowLeft size={16} />
-            Panel Klasyczny
-          </Link>
-          <span className="text-[#28354D]">|</span>
           <Link
             href="/dashboard"
             className="flex items-center gap-1.5 text-xs font-bold text-[#38BDF8] hover:underline"
@@ -421,7 +413,7 @@ function LeadsPageContent() {
             <LayoutDashboard size={14} />
             Dashboard
           </Link>
-          <span className="text-[#28354D]">|</span>
+          <span className="text-[#28354D]">/</span>
           <div className="flex items-center gap-2">
             <Building size={18} className="text-[#FFE600]" />
             <h1 className="text-base font-extrabold text-white">Pipeline CRM & Baza Leadów</h1>
