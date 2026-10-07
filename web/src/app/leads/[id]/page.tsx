@@ -89,7 +89,7 @@ function LeadDossierContent() {
     setIsAuditing(true);
     showToast("Uruchamianie bezpiecznego audytora WWW...", "info");
     try {
-      const res = await fetch(`/api/leads/${leadId}/audit`, { method: "POST" });
+      const res = await fetch(`/api/audit/${leadId}`, { method: "POST" });
       const data = await res.json();
       if (data.success) {
         showToast("Audyt zakończony pomyślnie!", "success");
@@ -108,7 +108,7 @@ function LeadDossierContent() {
     setIsQualifying(true);
     showToast("Przeliczanie scoringu i reguł kwalifikacji...", "info");
     try {
-      const res = await fetch(`/api/leads/${leadId}/qualify`, { method: "POST" });
+      const res = await fetch(`/api/qualify/${leadId}`, { method: "POST" });
       const data = await res.json();
       if (data.success) {
         showToast("Scoring przeliczony pomyślnie!", "success");
@@ -127,10 +127,10 @@ function LeadDossierContent() {
     setIsGeneratingOffer(true);
     showToast("Generowanie dedykowanej oferty i strony lądowania...", "info");
     try {
-      const res = await fetch(`/api/offers/generate`, {
+      const res = await fetch(`/api/offers/${leadId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ leadId: parseInt(leadId, 10) }),
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (data.success) {

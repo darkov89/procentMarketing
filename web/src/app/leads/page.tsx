@@ -283,7 +283,7 @@ function LeadsPageContent() {
         total: targetLeads.length,
       });
       try {
-        await fetch(`/api/generate-offer/${targetLeads[i].id}`, { method: "POST" });
+        await fetch(`/api/offers/${targetLeads[i].id}`, { method: "POST" });
         successCount++;
       } catch (err) {
         console.error(err);

@@ -342,11 +342,26 @@ export async function POST(req: Request) {
     const voivodeship = (body.voivodeship || body.targetVoivodeship || "Dolnośląskie").trim();
     const city = (body.city || body.defaultCity || "Wrocław").trim();
     const radiusKm = parseFloat(body.radiusKm !== undefined ? body.radiusKm : "35");
+    const requestedLimit = typeof body.limit === "number" && body.limit > 0 ? body.limit : 20;
 
-    let keyword = (body.keyword || "").trim();
+    let keyword = (body.query || body.customQuery || body.keyword || "").trim();
+    if (!keyword && body.industry) {
+      const industryMap: Record<string, string> = {
+        stomatologia: "stomatolog klinika stomatologiczna",
+        medycyna_estetyczna: "medycyna estetyczna kosmetologia",
+        fotowoltaika: "fotowoltaika pompy ciepła OZE",
+        kancelarie: "kancelaria prawna radca prawny adwokat",
+        ksiegowosc: "biuro rachunkowe księgowość doradztwo podatkowe",
+        biura_rachunkowe: "biuro rachunkowe księgowość doradztwo podatkowe",
+        motoryzacja: "mechanika pojazdowa serwis samochodowy auto detailing",
+        budownictwo: "firma budowlana remonty usługi budowlane",
+      };
+      keyword = industryMap[body.industry] || body.industry;
+    }
+
     if (!keyword || keyword.toLowerCase() === "all" || keyword.toLowerCase() === "wszystkie") {
       if (companyScale === "mikro") {
-        keyword = "usługi serwis kancelaria gabinet";
+        keyword = "usługi serwis kancelaria gabinet biuro";
       } else if (companyScale === "male") {
         keyword = "przedsiębiorstwa spółka przemysł";
       } else {
@@ -371,7 +386,7 @@ export async function POST(req: Request) {
           city,
           voivodeship,
           apiKey: googleApiKey,
-          maxResults: 15,
+          maxResults: Math.min(requestedLimit, 60),
         });
 
         if (placesResult.items && placesResult.items.length > 0) {

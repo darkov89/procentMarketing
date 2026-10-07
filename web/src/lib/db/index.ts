@@ -3,11 +3,9 @@ import { drizzle } from "drizzle-orm/neon-serverless";
 import ws from "ws";
 import * as schema from "./schema";
 
-const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString) {
-  throw new Error("DATABASE_URL environment variable is not defined.");
-}
+const connectionString =
+  process.env.DATABASE_URL ||
+  "postgresql://postgres:postgres@localhost:5432/postgres";
 
 // In Node.js environments (CLI, test, serverless runtime without global WebSocket), configure ws
 if (typeof WebSocket === "undefined" && typeof globalThis.WebSocket === "undefined") {

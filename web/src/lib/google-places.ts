@@ -168,41 +168,53 @@ export async function searchGooglePlaces(params: {
   // 1. Try Google Places API (New v1)
   try {
     const pNewUrl = `https://places.googleapis.com/v1/places:searchText`;
-    const pNewRes = await fetch(pNewUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Goog-Api-Key": cleanKey,
-        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.location,places.businessStatus",
-      },
-      body: JSON.stringify({
-        textQuery: query,
-        pageSize: Math.min(maxResults, 20),
-        languageCode: "pl",
-      }),
-      signal: AbortSignal.timeout(9000),
-    });
+    const allPlaces: any[] = [];
+    let pageToken: string | undefined = undefined;
 
-    if (pNewRes.ok) {
-      const pNewData = await pNewRes.json();
-      if (Array.isArray(pNewData.places) && pNewData.places.length > 0) {
-        const items: GooglePlaceResult[] = pNewData.places.map((p: any) => ({
-          placeId: p.id,
-          name: p.displayName?.text || "",
-          address: p.formattedAddress || "",
-          city: extractCityFromAddress(p.formattedAddress, city),
-          lat: p.location?.latitude,
-          lon: p.location?.longitude,
-          rating: p.rating || null,
-          reviewsCount: p.userRatingCount || 0,
-          phone: p.internationalPhoneNumber || p.nationalPhoneNumber || "",
-          website: p.websiteUri || "",
-          businessStatus: p.businessStatus,
-          sourceEngine: "google_places_new" as const,
-        }));
+    while (allPlaces.length < maxResults) {
+      const pNewRes: Response = await fetch(pNewUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": cleanKey,
+          "X-Goog-FieldMask":
+            "places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.internationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.location,places.businessStatus,nextPageToken",
+        },
+        body: JSON.stringify({
+          textQuery: query,
+          pageSize: Math.min(maxResults - allPlaces.length, 20),
+          pageToken,
+          languageCode: "pl",
+        }),
+        signal: AbortSignal.timeout(9000),
+      });
 
-        return { items, engineUsed: "google_places_new" };
-      }
+      if (!pNewRes.ok) break;
+      const pNewData: any = await pNewRes.json();
+      if (!Array.isArray(pNewData.places) || pNewData.places.length === 0) break;
+
+      allPlaces.push(...pNewData.places);
+      if (!pNewData.nextPageToken || allPlaces.length >= maxResults) break;
+      pageToken = pNewData.nextPageToken;
+    }
+
+    if (allPlaces.length > 0) {
+      const items: GooglePlaceResult[] = allPlaces.map((p: any) => ({
+        placeId: p.id,
+        name: p.displayName?.text || "",
+        address: p.formattedAddress || "",
+        city: extractCityFromAddress(p.formattedAddress, city),
+        lat: p.location?.latitude,
+        lon: p.location?.longitude,
+        rating: p.rating || null,
+        reviewsCount: p.userRatingCount || 0,
+        phone: p.internationalPhoneNumber || p.nationalPhoneNumber || "",
+        website: p.websiteUri || "",
+        businessStatus: p.businessStatus,
+        sourceEngine: "google_places_new" as const,
+      }));
+
+      return { items, engineUsed: "google_places_new" };
     }
   } catch (err) {
     console.warn("Places API New attempt failed, falling back to legacy:", err);

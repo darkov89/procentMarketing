@@ -18,26 +18,45 @@ export type CompanyScale = "mikro" | "male" | "msp";
 export default function DiscoveryPage() {
   const router = useRouter();
   const [scale, setScale] = useState<CompanyScale>("mikro");
-  const [city, setCity] = useState("Legnica");
-  const [industry, setIndustry] = useState("stomatologia");
+  const [city, setCity] = useState("Wrocław");
+  const [voivodeship, setVoivodeship] = useState("Dolnośląskie");
+  const [industry, setIndustry] = useState("biura_rachunkowe");
   const [customQuery, setCustomQuery] = useState("");
-  const [radiusKm, setRadiusKm] = useState(30);
-  const [limit, setLimit] = useState(10);
+  const [radiusKm, setRadiusKm] = useState(35);
+  const [limit, setLimit] = useState(20);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<any[]>([]);
   const [stats, setStats] = useState<{ found?: number; inserted?: number; duplicates?: number } | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [syncFromSettings, setSyncFromSettings] = useState(false);
 
   const showToast = (message: string, type: "success" | "error" | "info" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
 
+  // Synchronize initial values with central settings
+  React.useEffect(() => {
+    async function loadSettings() {
+      try {
+        const res = await fetch("/api/settings/targeting");
+        const data = await res.json();
+        if (data.success && data.preferences) {
+          if (data.preferences.defaultCity) setCity(data.preferences.defaultCity);
+          if (data.preferences.targetVoivodeship) setVoivodeship(data.preferences.targetVoivodeship);
+          if (data.preferences.defaultRadiusKm) setRadiusKm(data.preferences.defaultRadiusKm);
+          setSyncFromSettings(true);
+        }
+      } catch {}
+    }
+    loadSettings();
+  }, []);
+
   const handleRunDiscovery = async () => {
     setRunning(true);
     setStats(null);
     setResults([]);
-    showToast("Wyszukiwanie i pozyskiwanie firm (Places Grid & Scraper)...", "info");
+    showToast("Wyszukiwanie i pozyskiwanie firm (Google Places & Registry)...", "info");
 
     try {
       const res = await fetch("/api/scraper", {
@@ -45,8 +64,10 @@ export default function DiscoveryPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           city,
+          voivodeship,
           industry,
           query: customQuery || undefined,
+          keyword: customQuery || undefined,
           radiusKm,
           limit,
           companyScale: scale,
@@ -57,12 +78,12 @@ export default function DiscoveryPage() {
 
       const data = await res.json();
       if (data.success) {
-        showToast(`Pozyskano ${data.insertedCount ?? data.leads?.length ?? 0} nowych leadów!`, "success");
-        setResults(data.leads || []);
+        showToast(`Pozyskano ${data.added ?? data.insertedCount ?? data.leads?.length ?? 0} nowych leadów!`, "success");
+        setResults(data.addedLeads || data.leads || []);
         setStats({
-          found: data.totalFound || data.leads?.length || 0,
-          inserted: data.insertedCount || data.leads?.length || 0,
-          duplicates: data.duplicateCount || 0,
+          found: data.scanned || data.totalFound || data.leads?.length || 0,
+          inserted: data.added || data.insertedCount || data.leads?.length || 0,
+          duplicates: data.rejectedDuplicates || data.duplicateCount || 0,
         });
       } else {
         showToast(data.error || "Błąd wyszukiwania firm", "error");
@@ -212,17 +233,26 @@ export default function DiscoveryPage() {
             </div>
 
             <div>
-              <label className="block text-[#94A3B8] font-bold mb-1">Branża / Nisza</label>
+              <label className="block text-[#94A3B8] font-bold mb-1">
+                Branża / Nisza
+                {syncFromSettings && (
+                  <span className="ml-2 text-[10px] text-emerald-400 font-mono font-normal">
+                    (Zsynchronizowano z Ustawieniami)
+                  </span>
+                )}
+              </label>
               <select
                 value={industry}
                 onChange={(e) => setIndustry(e.target.value)}
                 className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2 text-white"
               >
+                <option value="biura_rachunkowe">Biura Rachunkowe & Księgowość</option>
+                <option value="kancelarie">Kancelarie Prawne & Doradztwo</option>
                 <option value="stomatologia">Stomatologia / Gabinety Dentystyczne</option>
                 <option value="medycyna_estetyczna">Medycyna Estetyczna & Kosmetologia</option>
                 <option value="fotowoltaika">Fotowoltaika & Pompy Ciepła</option>
-                <option value="kancelarie">Kancelarie Prawne & Doradztwo</option>
                 <option value="motoryzacja">Serwisy Samochodowe & Detailing</option>
+                <option value="budownictwo">Budownictwo & Remonty</option>
                 <option value="inne">Inne (Użyj własnego zapytania poniżej)</option>
               </select>
             </div>
