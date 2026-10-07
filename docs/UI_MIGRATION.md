@@ -9,9 +9,8 @@ Mapa funkcji monolitu `web/src/app/page.tsx` (7146 linii) → docelowe trasy. Pr
 | Drawer leada (`drawerTab=details\|audit\|offer\|email`) | `/leads/[id]?tab=dane\|dowody\|kontakt\|oferta\|korespondencja\|zadania\|historia` | ✅ (Dedicated Dossier route + 7 modular tabs) |
 | `activeTab="review"` | `/leads?filter=needs_review` | ✅ (Handled via /leads?filter=needs_review) |
 | `activeTab="generator"` (scraper / discovery) | `/campaigns/[id]/discovery` | ⏳ |
-| `activeTab="import"` (CSV/XLSX) | `/leads/import` | ⏳ |
-| `activeTab="outreach"` (zatwierdzanie i wysyłka partii) | `/outbox` | ⏳ |
-| `activeTab="history"` (Baza Wysłanych, KPI) | `/outbox/history` | ⏳ |
+| `activeTab="outreach"` (zatwierdzanie i wysyłka partii) | `/outbox` | ✅ (Batch approval, AI Act Art. 14, send execution) |
+| `activeTab="history"` (Baza Wysłanych, KPI) | `/outbox/history` | ✅ (Real-time KPI metrics, IMAP replies, B2B meetings table) |
 | KPI / statystyki | `/dashboard` | ✅ (RSC na `calculateDashboardMetrics`) |
 
 ## Wspólne elementy
