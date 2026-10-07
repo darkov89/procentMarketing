@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -18,7 +18,7 @@ import { LeadsPagination } from "@/components/leads/leads-pagination";
 import { BulkActionsBar, BulkStatusModal } from "@/components/leads/leads-bulk-actions";
 import { ToastNotification, ToastMessage } from "@/components/ui/toast-notification";
 
-export default function LeadsPage() {
+function LeadsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialStatus = searchParams.get("status") || "all";
@@ -561,5 +561,22 @@ export default function LeadsPage() {
         />
       </main>
     </div>
+  );
+}
+
+export default function LeadsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#0A0E17] flex items-center justify-center text-white">
+          <div className="flex items-center gap-2 text-sm text-[#94A3B8]">
+            <RefreshCw size={18} className="animate-spin text-[#FFE600]" />
+            <span>Ładowanie bazy CRM...</span>
+          </div>
+        </div>
+      }
+    >
+      <LeadsPageContent />
+    </Suspense>
   );
 }

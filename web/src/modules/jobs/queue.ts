@@ -31,6 +31,7 @@ export interface ClaimJobOptions {
   workerId: string;
   heartbeatTimeoutSeconds?: number;
   maxActivePerTenant?: number;
+  tenantId?: number;
 }
 
 export interface JobRecord {
@@ -168,6 +169,7 @@ export class PostgresJobQueue implements JobQueue {
               )
               AND j.run_at <= NOW()
               AND COALESCE(trc.running_count, 0) < ${maxActivePerTenant}
+              ${options.tenantId ? sql`AND j.tenant_id = ${options.tenantId}` : sql``}
               ORDER BY j.priority ASC, j.run_at ASC, j.id ASC
               FOR UPDATE SKIP LOCKED
               LIMIT 1

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, Suspense } from "react";
 import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { FullLeadDossier, DossierTab } from "@/components/lead-dossier/dossier-types";
 import { DossierHeader } from "@/components/lead-dossier/dossier-header";
@@ -15,7 +15,7 @@ import { ToastNotification, ToastMessage } from "@/components/ui/toast-notificat
 import { RefreshCw, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 
-export default function LeadDossierPage() {
+function LeadDossierContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -247,5 +247,22 @@ export default function LeadDossierPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function LeadDossierPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#0A0E17] flex items-center justify-center text-white">
+          <div className="flex items-center gap-2 text-sm text-[#94A3B8]">
+            <RefreshCw size={18} className="animate-spin text-[#FFE600]" />
+            <span>Ładowanie akt leada...</span>
+          </div>
+        </div>
+      }
+    >
+      <LeadDossierContent />
+    </Suspense>
   );
 }

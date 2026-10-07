@@ -2,7 +2,20 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import nodemailer from "nodemailer";
-import { db, leads, messages, suppression, appSettings, leadEvents, campaigns, campaignLeads, emailAccounts } from "@/lib/db";
+import {
+  db,
+  leads,
+  messages,
+  suppression,
+  blocks,
+  appSettings,
+  leadEvents,
+  campaigns,
+  campaignLeads,
+  batches,
+  channelPermissions,
+  emailAccounts,
+} from "@/lib/db";
 import { and, eq, gte, sql } from "drizzle-orm";
 import { isWithinSendingWindow } from "./polish-calendar";
 import { transitionLead, LeadStatus } from "./state-machine";
@@ -29,13 +42,14 @@ export const DEFAULT_DAILY_LIMIT = 5;
 export const MAX_DAILY_LIMIT = 30;
 
 /**
- * Checks if a specific identifier is on the suppression list
+ * Checks if a specific identifier is on the suppression list or blocks table
  */
 export async function isSuppressed(params: {
   email?: string | null;
   nip?: string | null;
   phone?: string | null;
   domain?: string | null;
+  tenantId?: number | null;
 }): Promise<{ suppressed: boolean; reason?: string }> {
   const hashesToCheck: string[] = [];
 
@@ -74,6 +88,32 @@ export async function isSuppressed(params: {
     return { suppressed: false };
   }
 
+  // 1. Check blocks table (Phase 2 extension)
+  const blockMatches = await db
+    .select({
+      id: blocks.id,
+      reason: blocks.reason,
+      kind: blocks.kind,
+    })
+    .from(blocks)
+    .where(
+      params.tenantId
+        ? and(
+            eq(blocks.tenantId, params.tenantId),
+            sql`${blocks.hash} IN ${hashesToCheck}`
+          )
+        : sql`${blocks.hash} IN ${hashesToCheck}`
+    )
+    .limit(1);
+
+  if (blockMatches.length > 0) {
+    return {
+      suppressed: true,
+      reason: `Zablokowano w blocks (${blockMatches[0].kind}: ${blockMatches[0].reason})`,
+    };
+  }
+
+  // 2. Check suppression table
   const matches = await db
     .select({
       id: suppression.id,
@@ -82,7 +122,12 @@ export async function isSuppressed(params: {
     })
     .from(suppression)
     .where(
-      sql`${suppression.hashedEmail} IN ${hashesToCheck} OR ${suppression.hashedDomain} IN ${hashesToCheck} OR ${suppression.hashedNip} IN ${hashesToCheck} OR ${suppression.hashedPhone} IN ${hashesToCheck}`
+      params.tenantId
+        ? and(
+            eq(suppression.tenantId, params.tenantId),
+            sql`${suppression.hashedEmail} IN ${hashesToCheck} OR ${suppression.hashedDomain} IN ${hashesToCheck} OR ${suppression.hashedNip} IN ${hashesToCheck} OR ${suppression.hashedPhone} IN ${hashesToCheck}`
+          )
+        : sql`${suppression.hashedEmail} IN ${hashesToCheck} OR ${suppression.hashedDomain} IN ${hashesToCheck} OR ${suppression.hashedNip} IN ${hashesToCheck} OR ${suppression.hashedPhone} IN ${hashesToCheck}`
     )
     .limit(1);
 
@@ -234,14 +279,17 @@ export async function sendMessage(
     dbKillSetting && (dbKillSetting.value as Record<string, unknown>)?.active === true
   );
 
-  // Check campaign kill switch and status if lead belongs to a campaign
+  // Check campaign kill switch, status, batch and channel permissions if lead belongs to a campaign
   const [campaignLeadRecord] = await db
     .select({
       campaignId: campaignLeads.campaignId,
+      campaignLeadId: campaignLeads.id,
+      batchId: campaignLeads.batchId,
       campaignStatus: campaigns.status,
       campaignKillSwitch: campaigns.killSwitch,
       campaignTestMode: campaigns.testMode,
       emailAccountId: campaigns.emailAccountId,
+      playbookVersionId: campaigns.playbookVersionId,
     })
     .from(campaignLeads)
     .innerJoin(campaigns, eq(campaignLeads.campaignId, campaigns.id))
@@ -278,6 +326,53 @@ export async function sendMessage(
       isTestMode: true,
       recipient: lead.emailPrimary || "",
     };
+  }
+
+  // If lead is in campaign, enforce batch approval (A8) and channel permissions
+  if (campaignLeadRecord) {
+    if (campaignLeadRecord.batchId) {
+      const [batch] = await db
+        .select({ status: batches.status })
+        .from(batches)
+        .where(eq(batches.id, campaignLeadRecord.batchId))
+        .limit(1);
+
+      if (!batch || batch.status !== "approved") {
+        return {
+          success: false,
+          messageId,
+          smtpMessageId: null,
+          status: "blocked",
+          reason: `Wysyłka zablokowana: partia #${campaignLeadRecord.batchId} nie została zatwierdzona (status: ${batch?.status || "brak"}).`,
+          isTestMode: true,
+          recipient: lead.emailPrimary || "",
+        };
+      }
+    }
+
+    // Channel permission check for email
+    const [emailPerm] = await db
+      .select({ status: channelPermissions.status })
+      .from(channelPermissions)
+      .where(
+        and(
+          eq(channelPermissions.campaignLeadId, campaignLeadRecord.campaignLeadId),
+          eq(channelPermissions.channel, "email")
+        )
+      )
+      .limit(1);
+
+    if (emailPerm && emailPerm.status === "no") {
+      return {
+        success: false,
+        messageId,
+        smtpMessageId: null,
+        status: "blocked",
+        reason: "Brak dopuszczenia kanału e-mail (odmowa / status no).",
+        isTestMode: true,
+        recipient: lead.emailPrimary || "",
+      };
+    }
   }
 
   // -------------------------------------------------------------
@@ -407,13 +502,14 @@ export async function sendMessage(
   }
 
   // -------------------------------------------------------------
-  // 8. SUPPRESSION CHECK (email, domain, NIP, phone)
+  // 8. SUPPRESSION & BLOCKS CHECK (email, domain, NIP, phone)
   // -------------------------------------------------------------
   const suppCheck = await isSuppressed({
     email: realRecipient,
     nip: lead.nip,
     phone: lead.phoneNormalized,
     domain: lead.website,
+    tenantId: lead.tenantId,
   });
 
   if (suppCheck.suppressed) {

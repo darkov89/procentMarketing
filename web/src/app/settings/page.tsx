@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -21,7 +21,7 @@ import { TeamSection, TeamUserState, InvitationState } from "@/components/settin
 
 type SettingsTab = "targeting" | "sender" | "mail" | "team";
 
-export default function SettingsPage() {
+function SettingsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialTab = (searchParams.get("tab") as SettingsTab) || "targeting";
@@ -574,5 +574,22 @@ export default function SettingsPage() {
         )}
       </main>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#0A0E17] flex items-center justify-center text-white">
+          <div className="flex items-center gap-2 text-sm text-[#94A3B8]">
+            <Server size={18} className="animate-spin text-[#FFE600]" />
+            <span>Ładowanie ustawień...</span>
+          </div>
+        </div>
+      }
+    >
+      <SettingsPageContent />
+    </Suspense>
   );
 }
