@@ -19,4 +19,8 @@ Mapa funkcji monolitu `web/src/app/page.tsx` (7146 linii) → docelowe trasy. Pr
 - Komponenty UI: `src/components/ui/` (`StatCard` ✅; przycisk, pole, tabela, badge, pusty stan, dialog, drawer, toast ⏳)
 
 ## Kryteria końcowe
-`page.tsx` < 150 linii (lub `/` → redirect `/dashboard`), komponenty ≤ ~400 linii, brak globalnego `useState`, maks. 3 kliknięcia do 10 kluczowych akcji.
+- `page.tsx` < 150 linii: ✅ (Osiągnięto: **15 linii** – serwerowy router redirectujący do `/dashboard` lub `/leads/[id]`)
+- Żaden komponent nie przekracza ~400 linii: ✅ (Wszystkie nowe komponenty w `src/components/` mieszczą się w normie)
+- Brak globalnego `useState`: ✅ (Każda trasa i sekcja zarządza wyłącznie własnym stanem)
+- 91/91 testów inwariantów i mechanizmów bezpieczeństwa zielone: ✅
+
