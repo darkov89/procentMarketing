@@ -2520,6 +2520,22 @@ export default function LeadMachineDashboard() {
             </div>
 
             <div className="flex items-center gap-2.5">
+              <a
+                href="/dashboard"
+                className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#38BDF8]/40 text-[#38BDF8] font-bold text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all"
+                title="Nowy Dashboard v2"
+              >
+                <BarChart3 size={14} />
+                <span>Dashboard v2</span>
+              </a>
+              <a
+                href="/settings"
+                className="bg-[#141C2E] hover:bg-[#1E293B] border border-[#FFE600]/40 text-[#FFE600] font-bold text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 transition-all"
+                title="Centrum Ustawień & Zespołu"
+              >
+                <SettingsIcon size={14} />
+                <span>Ustawienia /settings</span>
+              </a>
               <button
                 onClick={handleRunFullPipeline}
                 disabled={pipelineRunning}
