@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -116,55 +116,52 @@ export default function SettingsPage() {
   const [inviteGenerating, setInviteGenerating] = useState(false);
   const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null);
 
-  useEffect(() => {
-    let ignore = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/settings/mail");
-        const data = await res.json();
-        if (!ignore && data.success && data.config) {
-          setMailSettings((prev) => ({ ...prev, ...data.config }));
-        }
-      } catch {}
+  const fetchAllSettings = useCallback(async () => {
+    try {
+      const res = await fetch("/api/settings/mail");
+      const data = await res.json();
+      if (data.success && data.config) {
+        setMailSettings((prev) => ({ ...prev, ...data.config }));
+      }
+    } catch {}
 
-      try {
-        const resTargeting = await fetch("/api/settings/targeting");
-        const dataTargeting = await resTargeting.json();
-        if (!ignore && dataTargeting.success && dataTargeting.preferences) {
-          setTargetingSettings(dataTargeting.preferences);
-        }
-      } catch {}
+    try {
+      const resTargeting = await fetch("/api/settings/targeting");
+      const dataTargeting = await resTargeting.json();
+      if (dataTargeting.success && dataTargeting.preferences) {
+        setTargetingSettings(dataTargeting.preferences);
+      }
+    } catch {}
 
-      try {
-        const resSender = await fetch("/api/settings/sender-profile");
-        const dataSender = await resSender.json();
-        if (!ignore && dataSender.success && dataSender.profile) {
-          setSenderProfile(dataSender.profile);
-        }
-      } catch {}
+    try {
+      const resSender = await fetch("/api/settings/sender-profile");
+      const dataSender = await resSender.json();
+      if (dataSender.success && dataSender.profile) {
+        setSenderProfile(dataSender.profile);
+      }
+    } catch {}
 
-      try {
-        const resUser = await fetch("/api/auth/me");
-        const dataUser = await resUser.json();
-        if (!ignore && dataUser.success && dataUser.user) {
-          setCurrentUser(dataUser.user);
-        }
-      } catch {}
+    try {
+      const resUser = await fetch("/api/auth/me");
+      const dataUser = await resUser.json();
+      if (dataUser.success && dataUser.user) {
+        setCurrentUser(dataUser.user);
+      }
+    } catch {}
 
-      try {
-        const resTeam = await fetch("/api/auth/invitations");
-        const dataTeam = await resTeam.json();
-        if (!ignore && dataTeam.success) {
-          setInvitationsList(dataTeam.invitations || []);
-          setTeamUsersList(dataTeam.users || []);
-        }
-      } catch {}
-    })();
-
-    return () => {
-      ignore = true;
-    };
+    try {
+      const resTeam = await fetch("/api/auth/invitations");
+      const dataTeam = await resTeam.json();
+      if (dataTeam.success) {
+        setInvitationsList(dataTeam.invitations || []);
+        setTeamUsersList(dataTeam.users || []);
+      }
+    } catch {}
   }, []);
+
+  useEffect(() => {
+    fetchAllSettings();
+  }, [fetchAllSettings]);
 
   const switchTab = (tab: SettingsTab) => {
     setActiveTab(tab);
