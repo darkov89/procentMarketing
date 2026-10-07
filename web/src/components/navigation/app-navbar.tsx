@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   Building,
@@ -14,6 +14,10 @@ import {
   Menu,
   X,
   Plus,
+  Search,
+  Command,
+  User,
+  Sparkles,
 } from "lucide-react";
 
 interface NavItem {
@@ -70,7 +74,28 @@ const NAV_ITEMS: NavItem[] = [
 
 export function AppNavbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Global shortcut Cmd+K or Ctrl+K
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    router.push(`/leads?search=${encodeURIComponent(searchQuery.trim())}`);
+  };
 
   // Hide on public landing pages and auth screens
   if (
@@ -84,28 +109,34 @@ export function AppNavbar() {
   }
 
   return (
-    <header className="bg-[#0A0E17] border-b border-[#28354D] sticky top-0 z-50">
+    <header className="bg-[#0B0F19]/95 backdrop-blur-md border-b border-white/[0.08] sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-16 gap-4">
-          {/* Brand */}
-          <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between h-16 gap-3">
+          {/* Brand & Organization */}
+          <div className="flex items-center gap-3 shrink-0">
             <Link href="/dashboard" className="flex items-center gap-2.5 group">
-              <div className="w-8 h-8 rounded-lg bg-[#FFE600] text-black font-black flex items-center justify-center text-sm shadow-md shadow-yellow-500/20 group-hover:scale-105 transition-transform">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#FFE600] to-yellow-500 text-black font-black flex items-center justify-center text-sm shadow-md shadow-yellow-500/20 group-hover:scale-105 transition-transform">
                 %
               </div>
               <div className="flex flex-col">
-                <span className="text-xs font-black tracking-wider text-white uppercase group-hover:text-[#FFE600] transition-colors">
+                <span className="text-xs font-black tracking-wider text-white uppercase group-hover:text-[#FFE600] transition-colors leading-tight">
                   Procent Marketing
                 </span>
-                <span className="text-[10px] font-mono text-[#94A3B8]">
+                <span className="text-[10px] font-mono text-slate-400">
                   Lead Machine 2.0
                 </span>
               </div>
             </Link>
 
-            <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-[#1E293B] text-[#38BDF8] border border-[#334155]">
-              LIVE_MODE: TEST
-            </span>
+            <div className="hidden xl:flex items-center gap-1.5 pl-2 border-l border-slate-800">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+              </span>
+              <span className="text-[10px] font-mono font-bold text-amber-300 bg-amber-950/60 border border-amber-800/60 px-2 py-0.5 rounded-full">
+                TEST MODE
+              </span>
+            </div>
           </div>
 
           {/* Desktop Nav Links */}
@@ -117,44 +148,80 @@ export function AppNavbar() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                     isActive
-                      ? "bg-[#FFE600] text-black shadow-md shadow-yellow-500/10 font-extrabold"
-                      : "text-[#94A3B8] hover:text-white hover:bg-[#141C2E]"
+                      ? "bg-[#FFE600] text-black shadow-md shadow-yellow-500/20 font-extrabold"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/60"
                   }`}
                 >
-                  <Icon size={15} />
+                  <Icon size={14} />
                   <span>{item.label}</span>
                 </Link>
               );
             })}
           </nav>
 
-          {/* Desktop Action & Mobile Toggle */}
+          {/* Search, Action & User Profile */}
           <div className="flex items-center gap-2.5">
+            {/* Quick Search */}
+            <form onSubmit={handleSearchSubmit} className="hidden md:flex items-center relative">
+              <Search size={14} className="absolute left-3 text-slate-500 pointer-events-none" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Szukaj w bazie (⌘K)..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="bg-[#131B2F] border border-slate-800 hover:border-slate-700 focus:border-[#FFE600] text-xs text-white placeholder-slate-500 rounded-xl pl-9 pr-8 py-1.5 w-48 lg:w-56 focus:w-64 transition-all focus:outline-none"
+              />
+              <span className="absolute right-2.5 text-[9px] font-mono text-slate-500 border border-slate-700/80 px-1 py-0.2 rounded bg-slate-800/80 pointer-events-none">
+                ⌘K
+              </span>
+            </form>
+
+            {/* Quick Skaner Button */}
             <Link
               href="/discovery"
-              className="hidden sm:flex items-center gap-1.5 bg-[#141C2E] hover:bg-[#1E293B] border border-[#28354D] hover:border-[#FFE600] text-[#FFE600] font-bold text-xs px-3.5 py-2 rounded-xl transition-all"
+              className="hidden sm:flex items-center gap-1.5 bg-[#FFE600] hover:bg-[#FFF04D] text-black font-extrabold text-xs px-3.5 py-1.5 rounded-xl transition-all shadow-md shadow-yellow-500/10 shrink-0"
             >
               <Plus size={14} />
-              <span>Skanuj Google Places</span>
+              <span>Skaner Miejsc</span>
+            </Link>
+
+            {/* User Avatar */}
+            <Link
+              href="/settings"
+              className="flex items-center justify-center w-8 h-8 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:border-[#FFE600] transition-colors shrink-0"
+              title="Konto i Ustawienia"
+            >
+              <User size={15} />
             </Link>
 
             {/* Mobile hamburger */}
             <button
               type="button"
               onClick={() => setMobileOpen((prev) => !prev)}
-              className="lg:hidden p-2 rounded-xl text-[#94A3B8] hover:text-white hover:bg-[#141C2E] border border-[#28354D] cursor-pointer"
+              className="lg:hidden p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 cursor-pointer"
               aria-label="Toggle menu"
             >
-              {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+              {mobileOpen ? <X size={18} /> : <Menu size={18} />}
             </button>
           </div>
         </div>
 
         {/* Mobile Dropdown Menu */}
         {mobileOpen && (
-          <div className="lg:hidden border-t border-[#28354D] py-3 space-y-1">
+          <div className="lg:hidden border-t border-slate-800 py-3 space-y-1">
+            <form onSubmit={handleSearchSubmit} className="pb-2">
+              <input
+                type="text"
+                placeholder="Szukaj firmy, NIP, miasta..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full bg-[#131B2F] border border-slate-800 text-xs text-white placeholder-slate-500 rounded-xl px-3 py-2 focus:outline-none focus:border-[#FFE600]"
+              />
+            </form>
+
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               const isActive = item.match(pathname);
@@ -166,7 +233,7 @@ export function AppNavbar() {
                   className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
                     isActive
                       ? "bg-[#FFE600] text-black font-extrabold"
-                      : "text-[#94A3B8] hover:text-white hover:bg-[#141C2E]"
+                      : "text-slate-400 hover:text-white hover:bg-slate-800/80"
                   }`}
                 >
                   <Icon size={16} />
