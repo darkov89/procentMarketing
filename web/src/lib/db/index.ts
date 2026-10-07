@@ -17,6 +17,10 @@ if (typeof WebSocket === "undefined" && typeof globalThis.WebSocket === "undefin
 import { sql } from "drizzle-orm";
 
 export const pool = new Pool({ connectionString });
+pool.on("error", (err: unknown) => {
+  // Prevent unhandled error on idle clients in WebSocket pool
+  console.error("Unexpected database pool error:", err);
+});
 export const db = drizzle(pool, { schema });
 export * from "./schema";
 

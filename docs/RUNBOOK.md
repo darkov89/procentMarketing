@@ -112,3 +112,51 @@ System został zaprojektowany z myślą o maksymalnej elastyczności — możesz
 3. **Wysyłka Ręczna (1-Click Copy)**:
    - Jeżeli nie chcesz jeszcze konfigurować SMTP, kliknij przycisk **"Kopiuj Link"** lub w zakładce **Outreach E-mail** kliknij **"Kopiuj Treść Maila"**.
    - Wiadomość możesz natychmiast wkleić do swojego programu pocztowego (Gmail, Outlook), wiadomości LinkedIn lub komunikatora.
+
+---
+
+## 7. Kampanie Sponsoringowe & Zadaniowe (Preset Fundacji Szumi Las)
+
+W przypadku tenantów fundacyjnych realizujących pozyskiwanie partnerów i sponsorów (np. Fundacja Szumi Las):
+
+1. **Role i Odpowiedzialności**:
+   - **Dawid (Właściciel kampanii / Outreach)**:
+     - Weryfikacja rekordów wymagających ręcznej oceny (`requires_manual_review = true`, np. priorytet 3 dopasowania).
+     - Zatwierdzenie pierwszej partii (`approve_batch` w `/api/batches/[id]/approve`). Żaden e-mail nie wychodzi bez zatwierdzonej partii.
+     - Realizacja zaplanowanych zadań telefonicznych (`phone_call`) w widoku `/tasks`.
+   - **Ania (Finanse & Zgodność)**:
+     - Potwierdzanie faktycznych wpłat sponsoringowych (`confirm_payment` w `/api/outcomes/[id]/confirm`).
+     - Tylko potwierdzone wpłaty (`paid_minor` po `payment_confirmed_at`) zasilają statystyki dashboardu. Deklaracje nie są liczone jako zysk.
+   - **Jakub (Zarządzanie regułami kampanii)**:
+     - Weryfikacja kosztów i kwot sponsorskich (`manage_playbook`).
+2. **Sekwencja Zadaniowa i Bezpieczeństwo Kanału Telefonicznego**:
+   - Pierwszy kontakt: e-mail w czystym tekście bez załączników (`plain_text`).
+   - Telefon: zadanie telefoniczne tworzy się po **2 dniach roboczych** (z pominięciem weekendów i świąt PL) **wyłącznie po udanej wysyłce** e-maila.
+   - **Brak odpowiedzi nie jest zgodą na kontakt telefoniczny**: zadanie telefoniczne powstaje tylko wtedy, gdy `channel_permissions(phone) = yes`. W przeciwnym razie system tworzy zadanie weryfikacji uprawnień (`verify_channel`).
+   - W przypadku bounce'a lub błędu doręczenia e-maila, zadanie telefoniczne zostaje automatycznie zablokowane ze statusem `blocked` (`mail_error_to_clarify`).
+
+---
+
+## 8. Realizacja Praw Osób (RODO / GDPR - Procedury Operacyjne)
+
+Zgodnie z wymogami art. 15 i art. 17 RODO, operator systemu dysponuje dedykowanymi interfejsami API do technicznej obsługi wniosków osób, których dane dotyczą:
+
+1. **Eksport Danych (Art. 15 RODO - Prawo Dostępu)**:
+   - Żądanie: `GET /api/gdpr/export?leadId={id}` lub `GET /api/gdpr/export?email={email}`
+   - Autoryzacja: Wymaga aktywnej sesji użytkownika (`requireUser()`). Zapytanie jest izolowane per tenant (`tenant_id`).
+   - Odpowiedź: Kompletna struktura JSON zawierająca profil leada, powiązane kontakty, historię wysłanych i odebranych wiadomości, statusy uprawnień kanałowych (`channel_permissions`) oraz wpisy audytowe (`lead_events`).
+2. **Usunięcie Danych i Blokada (Art. 17 RODO - Prawo do Bycia Zapomnianym)**:
+   - Żądanie: `POST /api/gdpr/erase` z ciałem:
+     ```json
+     {
+       "leadId": 123,
+       "reason": "gdpr_erasure_request"
+     }
+     ```
+     (lub podając `"email": "kontakt@firma.pl"`).
+   - Działanie systemu:
+     - Anonimizacja rekordu w tabeli `leads` (usunięcie nazwy firmy, NIP-u, domeny, zresetowanie telefonu).
+     - Usunięcie danych kontaktowych z tabeli `contacts`.
+     - Anulowanie wszystkich otwartych zadań (`tasks.status = 'cancelled'`) i zatrzymanie sekwencji (`sequence_runs.status = 'stopped'`).
+     - **Nieodwracalne skróty SHA-256**: Generowanie trwałych wpisów blokujących w tabelach `blocks` oraz `suppression` dla adresu e-mail, domeny, telefonu i NIP-u z powodem `gdpr_erasure`. Zapewnia to, że nawet przy ponownym zaimportowaniu bazy podmiot nigdy nie otrzyma nowej korespondencji, a dane osobowe nie są przetrzymywane w postaci jawnej.
+

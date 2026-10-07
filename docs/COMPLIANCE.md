@@ -38,11 +38,24 @@ Przed skalowaniem wolumenu wysyłek zaleca się uzyskanie pisemnej opinii prawne
 
 ---
 
-## 3. Procedura Wykonywania Praw Osób (Opt-out / Forget)
+## 3. Techniczna Egzekucja Zgodności (RODO / PKE Architecture)
 
-1. **Opt-out (Sprzeciw wobec marketingu)**:
-   - Każde kliknięcie w link wypisania lub wysłanie maila o treści odmownej natychmiast trafia do tabeli `suppression`.
-   - Adres e-mail, telefon i domena są natychmiast blokowane we wszystkich pętlach wysyłkowych.
-2. **Prawo do bycia zapomnianym (`leadmachine forget --email ... / --nip ...`)**:
-   - Rekord leada, kontakty i audyt są trwale usuwane z tabel `leads`, `contacts`, `audits`, `offers`.
-   - Identyfikatory w tabeli `suppression` zostają zabezpieczone w postaci jednokierunkowych skrótów kryptograficznych (SHA-256) bez możliwości odtworzenia danych osobowych.
+System implementuje mechanizmy privacy-by-design oraz techniczne wsparcie dla praw osób, których dane dotyczą:
+
+1. **Obowiązek Informacyjny (Art. 14 RODO)**:
+   - Każda pierwsza wiadomość wychodząca zawiera w stopce jawną informację o tożsamości administratora, podstawie przetwarzania (art. 6 ust. 1 lit. f RODO) oraz bezwarunkowy link lub instrukcję opt-out.
+2. **Prawo Dostępu do Danych (Art. 15 RODO - Eksport Danych)**:
+   - Dedykowany endpoint `GET /api/gdpr/export?leadId={id}` (oraz `?email={email}`) zwraca całościowy profil przetwarzanych danych: rekord leada, powiązane kontakty, historię wysłanych wiadomości, uprawnienia kanałowe i audyt zdarzeń w formacie JSON.
+   - Endpoint jest zabezpieczony uwierzytelnieniem (`requireUser()`) i twardą izolacją tenanta.
+3. **Prawo do Usunięcia Danych (Art. 17 RODO - Prawo do Bycia Zapomnianym)**:
+   - Dedykowany endpoint `POST /api/gdpr/erase` realizuje procedurę trwałego usunięcia:
+     - Dane osobowe w tabelach `leads` oraz `contacts` podlegają natychmiastowej anonimizacji (zastąpienie nazw i identyfikatorów zanonimizowanymi placeholderami).
+     - Otwarte zadania są anulowane (`tasks.status = 'cancelled'`), a aktywne przebiegi sekwencji zatrzymane (`sequence_runs.status = 'stopped'`).
+     - **Nieodwracalne skróty kryptograficzne**: Adres e-mail, domena, telefon i NIP są haszowane algorytmem SHA-256 i zapisywane w tabelach `blocks` oraz `suppression`. Dzięki temu identyfikatory nie są przetrzymywane w formie jawnej, a system trwale uniemożliwia ponowny kontakt nawet w przypadku ponownego zaimportowania zewnętrznych baz danych.
+4. **Minimalizacja Danych i Retencja (Art. 5 ust. 1 lit. c RODO)**:
+   - Okresowe zadanie w tle (`cleanup` w `registry.ts`) automatycznie czyści obszerne surowe zrzuty HTML i teksty audytowe (`audits.rawEvidence`) dla leadów w stanach terminalnych (`lost`, `disqualified`, `unsubscribed`) starszych niż zdefiniowany czas retencji tenanta (domyślnie 90 dni).
+5. **Egzekucja Zgód Komunikacji Elektronicznej (PKE / art. 172 PT)**:
+   - Wszystkie kanały bezpośrednie (telefon, SMS, WhatsApp) są kontrolowane przez tabelę `channel_permissions`.
+   - Domyślny stan uprawnienia to `to_check`.
+   - Brak zatwierdzonego statusu `yes` uniemożliwia wygenerowanie zadania telefonicznego w sekwencji – system tworzy zamiast tego zadanie weryfikacji uprawnień (`verify_channel`) dla człowieka.
+

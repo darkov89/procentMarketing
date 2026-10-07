@@ -9,7 +9,7 @@ import { qualifyLead } from "@/lib/qualifier";
 import { generateOfferContent } from "@/lib/gemini";
 import { pollInboxAndProcess } from "@/lib/mail-service";
 import { db, leads, audits, offers, evidence } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { eq, and, isNotNull, inArray, lt } from "drizzle-orm";
 import { transitionLead, LeadStatus } from "@/lib/state-machine";
 import slugify from "slugify";
 import crypto from "crypto";
@@ -41,6 +41,9 @@ jobRegistry.register("send_message", async (job) => {
     throw new Error("Missing messageId in send_message job payload");
   }
   const result = await sendMessage(payload.messageId, { ignoreWindow: payload.ignoreWindow });
+  if (!result.success && result.status === "failed") {
+    throw new Error(result.reason || "Błąd wysyłki SMTP");
+  }
   return { ...result };
 });
 
@@ -186,6 +189,47 @@ jobRegistry.register("rollup_stats", async (job) => {
   return { tenantId: job.tenantId, rolledUpAt: new Date().toISOString() };
 });
 
-jobRegistry.register("cleanup", async () => {
-  return { cleanedAt: new Date().toISOString() };
+// 9. cleanup: retention policy enforcement (GDPR data minimization art. 5 ust. 1 lit. c)
+jobRegistry.register("cleanup", async (job) => {
+  const payload = (job.payload || {}) as { retentionDays?: number };
+  const retentionDays = payload.retentionDays || 90;
+  const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+
+  // Find terminal leads older than cutoffDate
+  const terminalLeads = await db
+    .select({ id: leads.id })
+    .from(leads)
+    .where(
+      and(
+        eq(leads.tenantId, job.tenantId),
+        inArray(leads.status, ["won", "lost", "unsubscribed", "blocked"]),
+        lt(leads.updatedAt, cutoffDate)
+      )
+    );
+
+  let cleanedAuditsCount = 0;
+  const terminalLeadIds = terminalLeads.map((l) => l.id);
+
+  if (terminalLeadIds.length > 0) {
+    const updated = await db
+      .update(audits)
+      .set({ rawEvidence: null })
+      .where(
+        and(
+          eq(audits.tenantId, job.tenantId),
+          inArray(audits.leadId, terminalLeadIds),
+          isNotNull(audits.rawEvidence)
+        )
+      )
+      .returning({ id: audits.id });
+    cleanedAuditsCount = updated.length;
+  }
+
+  return {
+    tenantId: job.tenantId,
+    retentionDays,
+    cutoffDate: cutoffDate.toISOString(),
+    cleanedAuditsCount,
+    cleanedAt: new Date().toISOString(),
+  };
 });

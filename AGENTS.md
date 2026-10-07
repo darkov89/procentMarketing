@@ -43,18 +43,24 @@ Każdy z poniższych inwariantów jest zweryfikowany zautomatyzowanym zestawem t
 
 ---
 
-## MULTI-TENANCY & BAZA WYSŁANYCH (DECOUPLED MODULAR ARCHITECTURE)
+## MULTI-TENANCY, PLAYBOOKI & BEZPIECZEŃSTWO (ARCHITEKTURA 2.0 - FAZY 0-10 UKOŃCZONE)
 
-- **Izolacja danych tenanta**: Każda encja w bazie (`leads`, `contacts`, `offers`, `messages`, `suppression`, `app_settings`, `lead_events`) posiada klucz `tenant_id`. Zapytania API są twardo filtrowane przez `tenant_id` przypisany do konta użytkownika w tabeli `tenant_members`.
-- **Baza Wysłanych & Metryki (`activeTab="history"`)**: Dedykowany widok operacyjny agregujący wysłaną korespondencję (Initial + do 3 Follow-upów), statusy doręczeń oraz interakcje z ofertą.
+- **Izolacja danych tenanta**: Każda encja w bazie (`leads`, `contacts`, `offers`, `messages`, `suppression`, `blocks`, `tasks`, `outcomes`, `campaigns`, `playbooks`, `app_settings`, `lead_events`) posiada klucz `tenant_id`. Zapytania API są twardo filtrowane przez `tenant_id` przypisany do konta użytkownika w tabeli `tenant_members`.
+- **Silnik Playbooków & Kampanii**: Kampanie opierają się na deklaratywnych playbookach (np. `agency_sales`, `sponsorship_fundraising` dla Fundacji Szumi Las). Sekwencje kroków, zadania telefoniczne i zasady dopuszczenia kanałów są w pełni konfigurowalne bez twardo zaszytych reguł.
+- **Baza Wysłanych & Metryki (`activeTab="history"`)**: Dedykowany widok operacyjny agregujący wysłaną korespondencję, statusy doręczeń oraz interakcje z ofertą.
 - **Śledzenie odsłon ofert publicznych**: Otwarcie strony `/o/[token]` natychmiastowo rejestruje wizytę (`view_count`, `last_viewed_at`) wraz ze zdarzeniem audytowym `recipient` w `lead_events`.
-- **Wskaźniki KPI czasu rzeczywistego**: Panel kalkuluje kluczowe miary: Wysłane Kontakty, Odsłony Ofert (/o/[token]) wraz z View Rate %, Wskaźnik Odpowiedzi (Reply Rate %) z IMAP oraz Umówione Spotkania B2B.
+- **Wskaźniki KPI czasu rzeczywistego**: Panel kalkuluje kluczowe miary: Wysłane Kontakty, Odsłony Ofert (/o/[token]) wraz z View Rate %, Wskaźnik Odpowiedzi (Reply Rate %) z IMAP oraz Umówione Spotkania B2B / Potwierdzone Wpłaty.
+- **Hardening i Bezpieczeństwo**: Nagłówki HTTP (HSTS, X-Frame-Options, CSP/nosniff) w `next.config.ts`, weryfikacja Anti-CSRF Origin dla mutacji HTTP w `middleware.ts`, ochrona RLS.
+- **Techniczna Realizacja Praw RODO**: Endpointy `/api/gdpr/export` (Art. 15 RODO) i `/api/gdpr/erase` (Art. 17 RODO - anonimizacja i nieodwracalne skróty SHA-256 w `blocks`), retencja i minimalizacja surowych danych audytowych w jobie `cleanup`.
+- **CI/CD**: Zautomatyzowany potok w `.github/workflows/ci.yml` weryfikujący typowanie TypeScript, lint, testy integracyjne i produkcyjny build Next.js.
 
 ---
 
 ## DOKUMENTACJA POWIĄZANA
 
 - `docs/ARCHITECTURE_V2.md` — Pełna specyfikacja architektury technicznej 2.0.
+- `docs/PLAN.md` — Plan wdrożenia i specyfikacja faz 0–10.
 - `docs/RUNBOOK.md` — Instrukcja codziennej obsługi przez właściciela ($\le 30$ min/dzień).
 - `docs/GO_LIVE_CHECKLIST.md` — Procedura i checklista przejścia na produkcję.
 - `docs/COMPLIANCE.md` — Rejestr zgodności RODO, EU AI Act i u.ś.u.d.e.
+

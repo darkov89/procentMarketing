@@ -20,6 +20,28 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // 2b. Anti-CSRF Origin check for state-changing API mutations
+  if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method) && pathname.startsWith("/api/")) {
+    const origin = request.headers.get("origin");
+    const host = request.headers.get("host");
+    if (origin && host) {
+      try {
+        const originHost = new URL(origin).host;
+        if (originHost !== host && !originHost.includes("localhost") && !originHost.includes("127.0.0.1")) {
+          return NextResponse.json(
+            { success: false, error: "Błąd weryfikacji CSRF: niepoprawny nagłówek Origin." },
+            { status: 403 }
+          );
+        }
+      } catch {
+        return NextResponse.json(
+          { success: false, error: "Błąd weryfikacji CSRF: nieprawidłowy nagłówek Origin." },
+          { status: 403 }
+        );
+      }
+    }
+  }
+
   // 3. Allow public client offer landing pages (accessed by leads)
   if (pathname.startsWith("/offers") || pathname.startsWith("/o/")) {
     return NextResponse.next();
