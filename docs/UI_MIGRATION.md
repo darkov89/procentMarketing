@@ -6,7 +6,7 @@ Mapa funkcji monolitu `web/src/app/page.tsx` (7146 linii) → docelowe trasy. Pr
 |---|---|---|
 | `activeTab="settings"` (SMTP/IMAP, klucze API, targetowanie, profil nadawcy) | `/settings` (`?tab=mail\|api\|targeting\|sender`) | ✅ (Dedicated modular route) |
 | `activeTab="crm"` (tabela leadów, filtry, akcje masowe) | `/leads` | ✅ (Modular route + toolbar + table + pagination + bulk actions) |
-| Drawer leada (`drawerTab=details\|audit\|offer\|email`) | `/leads/[id]?tab=dane\|dowody\|kontakt\|oferta\|korespondencja\|zadania\|historia` | ⏳ |
+| Drawer leada (`drawerTab=details\|audit\|offer\|email`) | `/leads/[id]?tab=dane\|dowody\|kontakt\|oferta\|korespondencja\|zadania\|historia` | ✅ (Dedicated Dossier route + 7 modular tabs) |
 | `activeTab="review"` | `/leads?filter=needs_review` | ✅ (Handled via /leads?filter=needs_review) |
 | `activeTab="generator"` (scraper / discovery) | `/campaigns/[id]/discovery` | ⏳ |
 | `activeTab="import"` (CSV/XLSX) | `/leads/import` | ⏳ |

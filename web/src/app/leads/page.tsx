@@ -510,7 +510,7 @@ export default function LeadsPage() {
             setEditValues({});
           }}
           onSelectLead={(lead) => {
-            router.push(`/?leadId=${lead.id}`);
+            router.push(`/leads/${lead.id}`);
           }}
           onClearFilters={() => {
             setSearch("");
