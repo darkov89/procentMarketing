@@ -86,16 +86,19 @@ export async function POST(req: Request) {
 
     // 5. Create session & set cookie
     const { token, expiresAt } = await createSession(newUser.id);
-    const cookieStore = await cookies();
-    cookieStore.set(SESSION_COOKIE_NAME, token, {
+    const isProd = process.env.NODE_ENV === "production";
+    const cookieOptions = {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
+      secure: isProd,
+      sameSite: "lax" as const,
       expires: expiresAt,
       path: "/",
-    });
+    };
 
-    return NextResponse.json({
+    const cookieStore = await cookies();
+    cookieStore.set(SESSION_COOKIE_NAME, token, cookieOptions);
+
+    const response = NextResponse.json({
       success: true,
       user: {
         id: newUser.id,
@@ -104,6 +107,10 @@ export async function POST(req: Request) {
         role: newUser.role,
       },
     });
+
+    response.cookies.set(SESSION_COOKIE_NAME, token, cookieOptions);
+
+    return response;
   } catch (err: any) {
     console.error("Register API error:", err);
     return NextResponse.json(

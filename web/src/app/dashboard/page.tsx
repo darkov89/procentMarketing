@@ -34,7 +34,8 @@ export default async function DashboardPage({
   let tenantId: number;
   try {
     ({ tenantId } = await requireTenant());
-  } catch {
+  } catch (err: any) {
+    console.error("Dashboard requireTenant failed:", err?.message || err);
     redirect("/login");
   }
 

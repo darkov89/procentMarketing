@@ -49,7 +49,7 @@ function LoginForm() {
 
       if (data.success) {
         setSuccessMsg(`Zalogowano pomyślnie! Przekierowanie...`);
-        const target = redirectPath && redirectPath !== "/login" ? redirectPath : "/dashboard";
+        const target = redirectPath && redirectPath !== "/login" && redirectPath !== "/" ? redirectPath : "/dashboard";
         setTimeout(() => {
           window.location.href = target;
         }, 500);
@@ -83,7 +83,7 @@ function LoginForm() {
 
       if (data.success) {
         setSuccessMsg("Konto zostało utworzone! Przekierowanie do panelu...");
-        const target = redirectPath && redirectPath !== "/login" ? redirectPath : "/dashboard";
+        const target = redirectPath && redirectPath !== "/login" && redirectPath !== "/" ? redirectPath : "/dashboard";
         setTimeout(() => {
           window.location.href = target;
         }, 800);
