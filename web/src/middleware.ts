@@ -15,6 +15,17 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // 1b. Enforce HTTPS in production / behind reverse proxy (Vercel, Cloudflare)
+  const proto = request.headers.get("x-forwarded-proto") || request.nextUrl.protocol.replace(":", "");
+  const host = request.headers.get("host") || request.nextUrl.host;
+  const isLocal = host.includes("localhost") || host.includes("127.0.0.1");
+
+  if (proto === "http" && !isLocal) {
+    const httpsUrl = request.nextUrl.clone();
+    httpsUrl.protocol = "https:";
+    return NextResponse.redirect(httpsUrl, 301);
+  }
+
   // 2. Allow auth API endpoints
   if (pathname.startsWith("/api/auth")) {
     return NextResponse.next();
@@ -23,11 +34,16 @@ export function middleware(request: NextRequest) {
   // 2b. Anti-CSRF Origin check for state-changing API mutations
   if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method) && pathname.startsWith("/api/")) {
     const origin = request.headers.get("origin");
-    const host = request.headers.get("host");
     if (origin && host) {
       try {
-        const originHost = new URL(origin).host;
-        if (originHost !== host && !originHost.includes("localhost") && !originHost.includes("127.0.0.1")) {
+        const originHost = new URL(origin).host.split(":")[0];
+        const normalizedHost = host.split(":")[0];
+        if (
+          originHost !== normalizedHost &&
+          !originHost.includes("localhost") &&
+          !originHost.includes("127.0.0.1") &&
+          !originHost.endsWith(".vercel.app")
+        ) {
           return NextResponse.json(
             { success: false, error: "Błąd weryfikacji CSRF: niepoprawny nagłówek Origin." },
             { status: 403 }
@@ -47,12 +63,8 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // 4. Allow /login and /invite pages
+  // 4. Allow /login and /invite pages (never redirect blindly from /login to prevent infinite loops)
   if (pathname === "/login" || pathname.startsWith("/invite")) {
-    const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-    if (token && pathname === "/login") {
-      return NextResponse.redirect(new URL("/", request.url));
-    }
     return NextResponse.next();
   }
 
@@ -67,9 +79,14 @@ export function middleware(request: NextRequest) {
       );
     }
 
-    const loginUrl = new URL("/login", request.url);
-    if (pathname !== "/") {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.search = "";
+    if (pathname !== "/" && !pathname.startsWith("/login")) {
       loginUrl.searchParams.set("redirect", pathname);
+    }
+    if (!isLocal) {
+      loginUrl.protocol = "https:";
     }
     return NextResponse.redirect(loginUrl);
   }

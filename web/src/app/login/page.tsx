@@ -49,10 +49,10 @@ function LoginForm() {
 
       if (data.success) {
         setSuccessMsg(`Zalogowano pomyślnie! Przekierowanie...`);
+        const target = redirectPath && redirectPath !== "/login" ? redirectPath : "/dashboard";
         setTimeout(() => {
-          router.push(redirectPath);
-          router.refresh();
-        }, 800);
+          window.location.href = target;
+        }, 500);
       } else {
         setError(data.error || "Błąd logowania");
       }
@@ -83,10 +83,10 @@ function LoginForm() {
 
       if (data.success) {
         setSuccessMsg("Konto zostało utworzone! Przekierowanie do panelu...");
+        const target = redirectPath && redirectPath !== "/login" ? redirectPath : "/dashboard";
         setTimeout(() => {
-          router.push(redirectPath);
-          router.refresh();
-        }, 1000);
+          window.location.href = target;
+        }, 800);
       } else {
         setError(data.error || "Błąd rejestracji");
       }
