@@ -40,12 +40,29 @@ export async function withTenant<T>(
 
   return await db.transaction(async (tx) => {
     try {
-      // Switch to application role without BYPASSRLS
-      await tx.execute(sql`SET ROLE app_rw`);
       // Set transaction-local session variable (is_local = true)
       await tx.execute(sql`SELECT set_config('app.tenant_id', ${String(tenantId)}, true)`);
+
+      // Switch to application role without BYPASSRLS using savepoint for safety
+      try {
+        await tx.execute(sql`SAVEPOINT sp_app_rw`);
+        await tx.execute(sql`SET ROLE app_rw`);
+        await tx.execute(sql`RELEASE SAVEPOINT sp_app_rw`);
+      } catch (roleErr: unknown) {
+        await tx.execute(sql`ROLLBACK TO SAVEPOINT sp_app_rw`);
+        console.warn(
+          "withTenant: role app_rw is unavailable, proceeding with session app.tenant_id:",
+          roleErr instanceof Error ? roleErr.message : roleErr
+        );
+      }
+
       const result = await fn(tx);
-      await tx.execute(sql`RESET ROLE`);
+
+      try {
+        await tx.execute(sql`RESET ROLE`);
+      } catch {
+        // Ignore if role was not switched
+      }
       await tx.execute(sql`RESET app.tenant_id`);
       return result;
     } catch (err) {

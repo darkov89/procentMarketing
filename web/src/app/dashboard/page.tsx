@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { requireTenant } from "@/lib/auth";
+import { requireTenant, AuthenticationError } from "@/lib/auth";
 import { calculateDashboardMetrics } from "@/modules/analytics/dashboard-metrics";
 import { StatCard } from "@/components/ui/stat-card";
 import { PipelineFunnel } from "@/components/dashboard/pipeline-funnel";
@@ -34,9 +34,20 @@ export default async function DashboardPage({
   let tenantId: number;
   try {
     ({ tenantId } = await requireTenant());
-  } catch (err: any) {
-    console.error("Dashboard requireTenant failed:", err?.message || err);
-    redirect("/login");
+  } catch (err: unknown) {
+    if (err instanceof AuthenticationError) {
+      redirect("/login");
+    }
+    console.error("Dashboard auth/tenant error:", err);
+    return (
+      <main className="mx-auto max-w-3xl p-8 text-white text-center space-y-4">
+        <h1 className="text-2xl font-bold text-rose-400">Błąd dostępu do organizacji</h1>
+        <p className="text-slate-300">
+          {(err as Error)?.message || "Nie udało się załadować profilu organizacji dla Twojego konta."}
+        </p>
+        <p className="text-xs text-slate-500">Skontaktuj się z administratorem lub odśwież stronę.</p>
+      </main>
+    );
   }
 
   const params = await searchParams;

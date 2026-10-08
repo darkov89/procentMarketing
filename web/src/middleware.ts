@@ -26,8 +26,12 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(httpsUrl, 301);
   }
 
-  // 2. Allow auth API endpoints
-  if (pathname.startsWith("/api/auth")) {
+  // 2. Allow auth, scheduler (Vercel cron), and recipient opt-out API endpoints
+  if (
+    pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/cron") ||
+    pathname === "/api/unsubscribe"
+  ) {
     return NextResponse.next();
   }
 

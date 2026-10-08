@@ -28,6 +28,7 @@ describe("API Security Scanner (Invariant 4)", () => {
     "api/auth/logout",
     "api/auth/invite/verify",
     "api/worker", // Protected by CRON_SECRET or auth session
+    "api/unsubscribe", // Protected by cryptographic opt-out token (RFC 8058 / RODO)
   ]);
 
   it("ensures every API route handler is guarded by requireUser() or documented security token", () => {
