@@ -33,7 +33,7 @@ export function DataHealthCard({
   const withContactPercent = Math.max(0, 100 - missingContactPercent);
 
   return (
-    <div className="bg-[#0E1424] border border-slate-800/90 rounded-2xl p-6 shadow-xl flex flex-col justify-between h-full">
+    <div className="bg-[#0D1322] border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between h-full">
       <div>
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-slate-800/80 mb-5">

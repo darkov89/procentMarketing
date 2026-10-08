@@ -29,25 +29,27 @@ export function StatCard({
   }[trendColor];
 
   const body = (
-    <div className="rounded-2xl border border-slate-800/90 bg-[#0E1424] hover:bg-[#131B2F] p-5 shadow-lg transition-all hover:border-[#FFE600]/80 group relative overflow-hidden">
-      <div className="flex items-center justify-between gap-3 mb-2">
-        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 group-hover:text-slate-300 transition-colors truncate">
-          {label}
-        </div>
-        {Icon && (
-          <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/60 flex items-center justify-center text-slate-300 group-hover:text-[#FFE600] transition-colors shrink-0">
-            <Icon size={16} />
+    <div className="rounded-2xl border border-slate-800 bg-[#0D1322] hover:bg-[#131B2F] p-5 shadow-md transition-all hover:border-[#FFE600] group relative overflow-hidden h-full flex flex-col justify-between min-h-[135px]">
+      <div>
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 group-hover:text-slate-300 transition-colors truncate">
+            {label}
           </div>
-        )}
-      </div>
+          {Icon && (
+            <div className="w-8 h-8 rounded-lg bg-slate-800/80 border border-slate-700/60 flex items-center justify-center text-slate-300 group-hover:text-[#FFE600] transition-colors shrink-0">
+              <Icon size={16} />
+            </div>
+          )}
+        </div>
 
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="text-2xl lg:text-3xl font-black text-white group-hover:text-[#FFE600] transition-colors tracking-tight">
-          {value}
+        <div className="flex items-baseline justify-between gap-2">
+          <div className="text-2xl lg:text-3xl font-black text-white group-hover:text-[#FFE600] transition-colors tracking-tight">
+            {value}
+          </div>
         </div>
       </div>
 
-      <div className="mt-2.5 flex items-center justify-between gap-2 text-xs">
+      <div className="mt-3 pt-2.5 border-t border-slate-800/60 flex items-center justify-between gap-2 text-xs">
         {hint ? (
           <div className="text-[11px] text-slate-400 group-hover:text-slate-300 transition-colors truncate">
             {hint}
@@ -67,11 +69,11 @@ export function StatCard({
   return href ? (
     <Link
       href={href}
-      className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FFE600] rounded-2xl transition-transform hover:-translate-y-0.5"
+      className="block h-full focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FFE600] rounded-2xl transition-transform hover:-translate-y-0.5"
     >
       {body}
     </Link>
   ) : (
-    body
+    <div className="h-full">{body}</div>
   );
 }

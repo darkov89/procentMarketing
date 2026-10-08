@@ -11,17 +11,21 @@ import {
   PhoneCall,
   ChevronRight,
   TrendingUp,
+  Sparkles,
+  Zap,
+  ArrowRight,
 } from "lucide-react";
 
 interface FunnelStage {
   id: string;
+  stepNumber: string;
   label: string;
   count: number;
   icon: React.ElementType;
   status: string;
   conversionPercent?: number;
-  conversionLabel?: string;
-  badgeColor?: string;
+  conversionLabel: string;
+  badgeColor: string;
 }
 
 interface PipelineFunnelProps {
@@ -51,92 +55,99 @@ export function PipelineFunnel({
   const stages: FunnelStage[] = [
     {
       id: "discovered",
-      label: "1. Znalezione",
+      stepNumber: "01",
+      label: "Znalezione",
       count: discovered,
       icon: Compass,
       status: "all",
-      conversionLabel: "Baza startowa",
-      badgeColor: "text-slate-400 bg-slate-800/80 border-slate-700",
+      conversionLabel: "Start bazy",
+      badgeColor: "text-slate-300 bg-slate-800/80 border-slate-700",
     },
     {
       id: "qualified",
-      label: "2. Kwalifikacja",
+      stepNumber: "02",
+      label: "Kwalifikacja",
       count: qualified,
       icon: CheckCircle2,
       status: "qualified",
       conversionPercent: calcRate(qualified, discovered),
-      conversionLabel: `${calcRate(qualified, discovered)}% z bazy`,
-      badgeColor: "text-sky-400 bg-sky-950/60 border-sky-800/60",
+      conversionLabel: `${calcRate(qualified, discovered)}% bazy`,
+      badgeColor: "text-sky-300 bg-sky-950/80 border-sky-800/60",
     },
     {
       id: "batched",
-      label: "3. W partii (Gotowe)",
+      stepNumber: "03",
+      label: "Gotowa Oferta",
       count: batched,
       icon: PackageCheck,
       status: "approved",
       conversionPercent: calcRate(batched, qualified),
       conversionLabel: `${calcRate(batched, qualified)}% gotowych`,
-      badgeColor: "text-indigo-400 bg-indigo-950/60 border-indigo-800/60",
+      badgeColor: "text-indigo-300 bg-indigo-950/80 border-indigo-800/60",
     },
     {
       id: "outreached",
-      label: "4. Wysłane (Outreach)",
+      stepNumber: "04",
+      label: "Wysłane",
       count: outreached,
       icon: Send,
       status: "in_sequence",
       conversionPercent: calcRate(outreached, batched),
       conversionLabel: `${calcRate(outreached, batched)}% wysłanych`,
-      badgeColor: "text-amber-400 bg-amber-950/60 border-amber-800/60",
+      badgeColor: "text-amber-300 bg-amber-950/80 border-amber-800/60",
     },
     {
       id: "replied",
-      label: "5. Odpowiedź",
+      stepNumber: "05",
+      label: "Odpowiedź",
       count: replied,
       icon: MessageSquare,
       status: "replied",
       conversionPercent: calcRate(replied, outreached),
-      conversionLabel: `${calcRate(replied, outreached)}% odpowiedzi`,
-      badgeColor: "text-emerald-400 bg-emerald-950/60 border-emerald-800/60",
+      conversionLabel: `${calcRate(replied, outreached)}% odp.`,
+      badgeColor: "text-emerald-300 bg-emerald-950/80 border-emerald-800/60",
     },
     {
       id: "in_talks",
-      label: "6. Rozmowa / Deal",
+      stepNumber: "06",
+      label: "Rozmowa / Deal",
       count: inTalks,
       icon: PhoneCall,
       status: "in_talks",
       conversionPercent: calcRate(inTalks, replied),
       conversionLabel: `${calcRate(inTalks, replied)}% rozmów`,
-      badgeColor: "text-[#FFE600] bg-yellow-950/60 border-yellow-800/60",
+      badgeColor: "text-[#FFE600] bg-yellow-950/80 border-yellow-800/60",
     },
   ];
 
   const overallConversion = calcRate(inTalks, discovered);
 
   return (
-    <div className="bg-[#0E1424] border border-slate-800/90 rounded-2xl p-6 shadow-2xl relative overflow-hidden">
+    <div className="bg-[#0D1322] border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl relative overflow-hidden space-y-5">
       {/* Background ambient subtle glow */}
-      <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 right-0 w-80 h-80 bg-yellow-500/5 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Funnel Header */}
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800/80">
+      {/* Autonomous Machine Header & Value Highlight */}
+      <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
         <div>
           <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <h2 className="text-base font-black text-white tracking-tight flex items-center gap-2">
               <TrendingUp className="text-[#FFE600]" size={18} />
-              Interaktywny Lejek Konwersji B2B (Pipeline Engine)
+              Autonomiczny Lejek Pozyskiwania (Active Campaign Engine)
             </h2>
-            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-400 border border-emerald-800/60">
-              Live Real-Time
+            <span className="text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-0.5 rounded-full bg-[#FFE600]/10 text-[#FFE600] border border-[#FFE600]/30 hidden sm:inline-flex">
+              Full Automation
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1">
-            Wizualizacja przepływu kontaktów z rejestrów i Google Places przez audyt, akceptację, outreach i odpowiedzi.
+            Automatyczne odkrywanie leadów z Google Places &bull; Audyt technologiczny WWW &bull; Generowanie ofert B2B &bull; Outreach
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           <div className="text-right">
-            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block">
+            <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block font-mono">
               Globalny Win-Rate
             </span>
             <span className="text-base font-black text-[#FFE600]">
@@ -148,13 +159,32 @@ export function PipelineFunnel({
             href="/leads"
             className="text-xs text-sky-400 hover:text-sky-300 font-bold hover:underline flex items-center gap-1"
           >
-            Zobacz całą tabelę CRM →
+            Pełny CRM &rarr;
           </Link>
         </div>
       </div>
 
-      {/* Funnel Pipeline Stages Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+      {/* Autonomous Workflow Bar (ActiveCampaign Visual Journey) */}
+      <div className="bg-[#080C14] border border-slate-800/80 rounded-xl p-3 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-slate-400 font-mono text-[11px]">
+          <Zap size={14} className="text-[#FFE600]" />
+          <span className="font-bold text-white uppercase tracking-wider">Przebieg Maszyny:</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium text-slate-300">
+          <span className="text-white font-bold">1. Google Places / CEIDG</span>
+          <span className="text-slate-600">&rarr;</span>
+          <span className="text-sky-300 font-semibold">2. Auto-Audyt WWW</span>
+          <span className="text-slate-600">&rarr;</span>
+          <span className="text-[#FFE600] font-bold">3. Auto-Oferta /o/[token]</span>
+          <span className="text-slate-600">&rarr;</span>
+          <span className="text-amber-300 font-semibold">4. Akceptacja & Outreach</span>
+          <span className="text-slate-600">&rarr;</span>
+          <span className="text-emerald-400 font-bold">5. Spotkanie & Deal</span>
+        </div>
+      </div>
+
+      {/* Funnel Pipeline Stages Grid (Equal Heights, No Wrapping Glitches) */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 items-stretch">
         {stages.map((stage, idx) => {
           const Icon = stage.icon;
           const maxBase = Math.max(discovered, 1);
@@ -164,46 +194,43 @@ export function PipelineFunnel({
             <Link
               key={stage.id}
               href={`/leads?status=${stage.status}`}
-              className="group relative bg-[#131B2F] hover:bg-[#1A243D] border border-slate-800 hover:border-[#FFE600]/80 rounded-xl p-4 transition-all duration-200 shadow-md hover:shadow-lg hover:-translate-y-0.5 focus:outline-none focus:ring-2 focus:ring-[#FFE600]"
+              className="group relative bg-[#111827] hover:bg-[#152033] border border-slate-800 hover:border-[#FFE600] rounded-xl p-3.5 transition-all duration-200 shadow-md flex flex-col justify-between h-full min-h-[145px] focus:outline-none focus:ring-2 focus:ring-[#FFE600]"
             >
-              {/* Stage number & Icon */}
-              <div className="flex items-center justify-between mb-2.5">
-                <div className="w-8 h-8 rounded-lg bg-slate-800/80 group-hover:bg-slate-700/80 border border-slate-700/60 flex items-center justify-center text-slate-300 group-hover:text-white transition-colors">
-                  <Icon size={16} />
-                </div>
-                {idx < stages.length - 1 && (
-                  <span className="hidden lg:block text-slate-700 group-hover:text-slate-500 transition-colors">
-                    <ChevronRight size={14} />
+              {/* Stage Top: Step & Icon */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[10px] font-mono font-bold text-slate-500 group-hover:text-slate-400">
+                    KROK {stage.stepNumber}
                   </span>
-                )}
-              </div>
+                  <div className="w-7 h-7 rounded-lg bg-slate-800/80 group-hover:bg-slate-700/80 border border-slate-700/60 flex items-center justify-center text-slate-300 group-hover:text-[#FFE600] transition-colors">
+                    <Icon size={14} />
+                  </div>
+                </div>
 
-              {/* Stage Label */}
-              <div className="text-xs font-bold text-slate-300 group-hover:text-white transition-colors truncate">
-                {stage.label}
-              </div>
+                {/* Stage Label */}
+                <div className="text-xs font-bold text-slate-200 group-hover:text-white transition-colors truncate">
+                  {stage.label}
+                </div>
 
-              {/* Count */}
-              <div className="mt-1 flex items-baseline justify-between gap-1">
-                <span className="text-2xl font-black text-white group-hover:text-[#FFE600] transition-colors tracking-tight">
+                {/* Count */}
+                <div className="mt-1 text-2xl font-black text-white group-hover:text-[#FFE600] transition-colors tracking-tight">
                   {stage.count}
-                </span>
+                </div>
               </div>
 
-              {/* Progress bar representing share of top of funnel */}
-              <div className="mt-2.5 h-1.5 w-full bg-slate-800/80 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-sky-500 to-[#FFE600] rounded-full transition-all duration-500"
-                  style={{ width: `${percentOfTotal}%` }}
-                />
-              </div>
+              {/* Stage Bottom: Progress & Conversion */}
+              <div className="mt-3 pt-2 border-t border-slate-800/60">
+                {/* Micro Progress Bar */}
+                <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden mb-2">
+                  <div
+                    className="h-full bg-gradient-to-r from-sky-500 via-indigo-500 to-[#FFE600] rounded-full transition-all duration-500"
+                    style={{ width: `${Math.max(percentOfTotal, 5)}%` }}
+                  />
+                </div>
 
-              {/* Conversion pill */}
-              <div className="mt-2.5">
+                {/* Conversion Pill */}
                 <span
-                  className={`inline-block text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
-                    stage.badgeColor || "text-slate-400 bg-slate-800 border-slate-700"
-                  }`}
+                  className={`inline-block text-[9px] font-mono font-bold px-2 py-0.5 rounded border truncate max-w-full ${stage.badgeColor}`}
                 >
                   {stage.conversionLabel}
                 </span>
@@ -214,13 +241,13 @@ export function PipelineFunnel({
       </div>
 
       {/* Pipeline Micro-Footer */}
-      <div className="mt-4 pt-3 border-t border-slate-800/60 flex flex-wrap items-center justify-between text-[11px] text-slate-400 gap-2">
+      <div className="pt-2 border-t border-slate-800/60 flex flex-wrap items-center justify-between text-[11px] text-slate-400 gap-2">
         <span className="flex items-center gap-1.5">
           <span className="inline-block w-2 h-2 rounded-full bg-emerald-400" />
-          Kliknij dowolny etap lejka, aby natychmiast otworzyć przefiltrowaną listę firm w CRM.
+          Kliknij dowolny etap lejka, aby otworzyć przefiltrowaną listę firm w CRM.
         </span>
         <span className="font-mono text-slate-400">
-          Potwierdzone sukcesy handlowe: <strong className="text-white">{paid}</strong>
+          Wygrane deale: <strong className="text-white">{paid}</strong>
         </span>
       </div>
     </div>
