@@ -4,6 +4,7 @@ import { db, users, invitations, sessions, tenants, tenantMembers } from "@/lib/
 import { eq, and, gt } from "drizzle-orm";
 
 export const SESSION_COOKIE_NAME = "pm_session_token";
+export const ACTIVE_TENANT_COOKIE_NAME = "pm_active_tenant_id";
 export const BOOTSTRAP_INVITE_CODE = process.env.BOOTSTRAP_INVITE_CODE || "";
 
 export interface SafeUser {
@@ -16,6 +17,7 @@ export interface SafeUser {
   tenantName?: string;
   tenantRole?: string;
   capabilities?: string[];
+  isSuperAdmin?: boolean;
   createdAt?: Date;
 }
 
@@ -126,7 +128,10 @@ export async function createSession(userId: number): Promise<{ token: string; ex
 /**
  * Validate session token and return user
  */
-export async function validateSessionToken(token: string): Promise<SafeUser | null> {
+export async function validateSessionToken(
+  token: string,
+  requestedTenantId?: number
+): Promise<SafeUser | null> {
   if (!token) return null;
 
   try {
@@ -146,6 +151,7 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
     if (result.length === 0) return null;
 
     const user = result[0];
+    const isSuperAdmin = user.role === "admin";
 
     // Resolve tenant membership strictly from database
     let tenantInfo: {
@@ -157,21 +163,82 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
     } = {};
 
     try {
-      const membership = await db
+      // 1. Load all memberships of this user for active tenants
+      const memberships = await db
         .select({
           tenantId: tenants.id,
           tenantSlug: tenants.slug,
           tenantName: tenants.name,
+          tenantIsActive: tenants.isActive,
           tenantRole: tenantMembers.role,
           capabilities: tenantMembers.capabilities,
         })
         .from(tenantMembers)
         .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
-        .where(eq(tenantMembers.userId, user.id))
-        .limit(1);
+        .where(eq(tenantMembers.userId, user.id));
 
-      if (membership.length > 0) {
-        tenantInfo = membership[0];
+      const activeMemberships = memberships.filter((m) => m.tenantIsActive);
+
+      // 2. Resolve requested or primary tenant
+      if (requestedTenantId && Number.isInteger(requestedTenantId)) {
+        const matchingMember = activeMemberships.find((m) => m.tenantId === requestedTenantId);
+        if (matchingMember) {
+          tenantInfo = matchingMember;
+        } else if (isSuperAdmin) {
+          // Super Admin can switch to ANY active tenant in the database
+          const [superTenant] = await db
+            .select({
+              tenantId: tenants.id,
+              tenantSlug: tenants.slug,
+              tenantName: tenants.name,
+              tenantIsActive: tenants.isActive,
+            })
+            .from(tenants)
+            .where(and(eq(tenants.id, requestedTenantId), eq(tenants.isActive, true)))
+            .limit(1);
+
+          if (superTenant) {
+            tenantInfo = {
+              tenantId: superTenant.tenantId,
+              tenantSlug: superTenant.tenantSlug,
+              tenantName: superTenant.tenantName,
+              tenantRole: "superadmin",
+              capabilities: ["*"],
+            };
+          } else if (activeMemberships.length > 0) {
+            // Target tenant not found or inactive; fall back to primary active membership
+            tenantInfo = activeMemberships[0];
+          }
+        } else if (activeMemberships.length > 0) {
+          // FAIL-CLOSED: Regular user attempted unauthorized access. Strictly fall back to valid membership.
+          tenantInfo = activeMemberships[0];
+        }
+      } else {
+        // No explicit tenant requested: pick first active membership
+        if (activeMemberships.length > 0) {
+          tenantInfo = activeMemberships[0];
+        } else if (isSuperAdmin) {
+          // If Super Admin has no explicit memberships, find first active tenant
+          const [firstActiveTenant] = await db
+            .select({
+              tenantId: tenants.id,
+              tenantSlug: tenants.slug,
+              tenantName: tenants.name,
+            })
+            .from(tenants)
+            .where(eq(tenants.isActive, true))
+            .limit(1);
+
+          if (firstActiveTenant) {
+            tenantInfo = {
+              tenantId: firstActiveTenant.tenantId,
+              tenantSlug: firstActiveTenant.tenantSlug,
+              tenantName: firstActiveTenant.tenantName,
+              tenantRole: "superadmin",
+              capabilities: ["*"],
+            };
+          }
+        }
       }
     } catch (err) {
       console.error("Error loading tenant membership:", err);
@@ -184,6 +251,7 @@ export async function validateSessionToken(token: string): Promise<SafeUser | nu
       email: user.email,
       name: user.name,
       role: user.role,
+      isSuperAdmin,
       tenantId: tenantInfo.tenantId,
       tenantSlug: tenantInfo.tenantSlug,
       tenantName: tenantInfo.tenantName,
@@ -223,15 +291,48 @@ export class AuthorizationError extends Error {
   }
 }
 
+function parseCookieHeader(cookieHeader?: string | null): Record<string, string> {
+  if (!cookieHeader) return {};
+  const map: Record<string, string> = {};
+  for (const part of cookieHeader.split(";")) {
+    const [k, v] = part.trim().split("=");
+    if (k && v) map[k] = decodeURIComponent(v);
+  }
+  return map;
+}
+
 /**
  * Get currently authenticated user in server components and route handlers
  */
-export async function getCurrentUser(): Promise<SafeUser | null> {
+export async function getCurrentUser(req?: Request): Promise<SafeUser | null> {
   try {
-    const cookieStore = await cookies();
-    const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+    let token: string | undefined;
+    let activeTenantCookie: string | undefined;
+
+    if (req) {
+      const cookieHeader = req.headers.get("cookie");
+      const parsed = parseCookieHeader(cookieHeader);
+      token = parsed[SESSION_COOKIE_NAME];
+      activeTenantCookie = parsed[ACTIVE_TENANT_COOKIE_NAME];
+    }
+
+    if (!token) {
+      try {
+        const cookieStore = await cookies();
+        token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
+        activeTenantCookie = activeTenantCookie || cookieStore.get(ACTIVE_TENANT_COOKIE_NAME)?.value;
+      } catch {
+        // Ignored if outside request context
+      }
+    }
+
     if (!token) return null;
-    return await validateSessionToken(token);
+    const parsedTenantId = activeTenantCookie ? parseInt(activeTenantCookie, 10) : undefined;
+    const requestedTenantId =
+      parsedTenantId && !isNaN(parsedTenantId) && parsedTenantId > 0
+        ? parsedTenantId
+        : undefined;
+    return await validateSessionToken(token, requestedTenantId);
   } catch {
     return null;
   }
@@ -241,8 +342,8 @@ export async function getCurrentUser(): Promise<SafeUser | null> {
  * INVARIANT 4: Authentication guard for API routes and server actions.
  * Throws AuthenticationError if not logged in.
  */
-export async function requireUser(): Promise<SafeUser> {
-  const user = await getCurrentUser();
+export async function requireUser(req?: Request): Promise<SafeUser> {
+  const user = await getCurrentUser(req);
   if (!user) {
     throw new AuthenticationError();
   }
@@ -263,6 +364,7 @@ export async function requireTenant(): Promise<{ user: SafeUser; tenantId: numbe
 }
 
 export const ROLE_DEFAULT_CAPABILITIES: Record<string, string[]> = {
+  superadmin: ["*"],
   owner: ["*"],
   admin: [
     "approve_batch",
@@ -282,7 +384,7 @@ export function can(user: SafeUser, capability: string): boolean {
   if (!user) return false;
 
   const userCaps = new Set<string>(user.capabilities || []);
-  if (userCaps.has("*") || userCaps.has(capability)) {
+  if (userCaps.has("*") || userCaps.has(capability) || user.isSuperAdmin) {
     return true;
   }
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { db, tenants, tenantMembers } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { requireUser } from "@/lib/auth";
 import slugify from "slugify";
 
@@ -8,7 +8,46 @@ export async function GET() {
   try {
     const user = await requireUser();
 
-    // Query all tenants the user belongs to
+    if (user.isSuperAdmin || user.role === "admin") {
+      // Super Admin: select all active tenants in system
+      const allTenants = await db
+        .select({
+          id: tenants.id,
+          slug: tenants.slug,
+          name: tenants.name,
+          plan: tenants.plan,
+          isActive: tenants.isActive,
+          createdAt: tenants.createdAt,
+        })
+        .from(tenants)
+        .where(eq(tenants.isActive, true));
+
+      // Fetch user's direct memberships to attach actual roles
+      const userMemberships = await db
+        .select({
+          tenantId: tenantMembers.tenantId,
+          role: tenantMembers.role,
+        })
+        .from(tenantMembers)
+        .where(eq(tenantMembers.userId, user.id));
+
+      const memberRoleMap = new Map(userMemberships.map((m) => [m.tenantId, m.role]));
+
+      const mapped = allTenants.map((t) => ({
+        ...t,
+        role: memberRoleMap.get(t.id) || "superadmin",
+        isDirectMember: memberRoleMap.has(t.id),
+      }));
+
+      return NextResponse.json({
+        success: true,
+        activeTenantId: user.tenantId ?? null,
+        isSuperAdmin: true,
+        tenants: mapped,
+      });
+    }
+
+    // Regular user: Query only active tenants the user belongs to
     const memberships = await db
       .select({
         id: tenants.id,
@@ -21,12 +60,13 @@ export async function GET() {
       })
       .from(tenantMembers)
       .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
-      .where(eq(tenantMembers.userId, user.id));
+      .where(and(eq(tenantMembers.userId, user.id), eq(tenants.isActive, true)));
 
     return NextResponse.json({
       success: true,
       activeTenantId: user.tenantId ?? null,
-      tenants: memberships,
+      isSuperAdmin: false,
+      tenants: memberships.map((m) => ({ ...m, isDirectMember: true })),
     });
   } catch (err: any) {
     if (err?.name === "AuthenticationError") {

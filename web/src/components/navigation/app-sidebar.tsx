@@ -16,6 +16,7 @@ import {
   Plus,
   X,
 } from "lucide-react";
+import { TenantSwitcher } from "@/components/navigation/tenant-switcher";
 
 interface NavItem {
   href: string;
@@ -176,6 +177,11 @@ export function AppSidebar({
             <X size={18} />
           </button>
         )}
+      </div>
+      
+      {/* Tenant Switcher (Organization Selector) */}
+      <div className="p-3 pb-0">
+        <TenantSwitcher collapsed={collapsed} />
       </div>
 
       {/* Primary Action Button (ActiveCampaign style "+ Skaner") */}
