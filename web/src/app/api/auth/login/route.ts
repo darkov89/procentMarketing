@@ -84,8 +84,25 @@ export async function POST(req: Request) {
       errorMessage = "Błąd połączenia z bazą danych (Neon). Upewnij się, że baza Neon jest aktywna i skonfigurowana w Vercel.";
     }
 
+    let dbHost = "NOT_SET";
+    try {
+      if (process.env.DATABASE_URL) {
+        const u = new URL(process.env.DATABASE_URL.replace(/^[a-z]+:\/\//, "https://"));
+        dbHost = u.host;
+      }
+    } catch {}
+
+    const causeMsg = err?.cause?.message || (typeof err?.cause === "string" ? err?.cause : JSON.stringify(err?.cause || {}));
+
     return NextResponse.json(
-      { success: false, error: errorMessage },
+      {
+        success: false,
+        error: errorMessage,
+        diagnostics: {
+          dbHost,
+          cause: causeMsg || err?.message,
+        },
+      },
       { status: 500 }
     );
   }
