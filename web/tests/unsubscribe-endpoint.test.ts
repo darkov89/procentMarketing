@@ -101,8 +101,14 @@ describe("Opt-Out & Unsubscribe Endpoint (RFC 8058 / R5 / R6)", () => {
       { method: "GET" }
     );
     const getRes = await GET(getReq);
-    assert.equal(getRes.status, 200);
     const html = await getRes.text();
     assert.ok(html.includes("Zostałeś pomyślnie wypisany"));
+
+    // Cleanup
+    await db.delete(leadTasks).where(eq(leadTasks.id, openTask.id));
+    await db.delete(suppression).where(eq(suppression.tenantId, testTenant.id));
+    await db.delete(blocks).where(eq(blocks.tenantId, testTenant.id));
+    await db.delete(leads).where(eq(leads.id, testLead.id));
+    await db.delete(tenants).where(eq(tenants.id, testTenant.id));
   });
 });

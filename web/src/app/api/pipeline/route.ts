@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { db, leads, audits, offers, evidence } from "@/lib/db";
-import { eq, or, notIlike, isNull, inArray } from "drizzle-orm";
+import { db, leads, audits, offers, evidence, appSettings } from "@/lib/db";
+import { eq, or, notIlike, isNull, inArray, and } from "drizzle-orm";
 import { auditWebsite, AuditFetchError } from "@/lib/auditor";
 import { qualifyLead, LeadDecision } from "@/lib/qualifier";
 import { generateOfferContent } from "@/lib/gemini";
@@ -121,8 +121,12 @@ export async function POST(req: Request) {
     for (const lead of allLeads) {
       if (lead.status === "qualified" && !lead.offer) {
         try {
-          const offerContent = await generateOfferContent(lead, lead.audit);
-          const safeSlug = slugify(`${lead.companyName}-${lead.city || "legnica"}`.toLowerCase(), {
+          const senderSetting = await db.query.appSettings.findFirst({
+            where: and(eq(appSettings.tenantId, lead.tenantId), eq(appSettings.key, "sender_profile")),
+          });
+          const defaultSender = senderSetting?.value as any;
+          const offerContent = await generateOfferContent(lead, lead.audit, { senderProfile: defaultSender });
+          const safeSlug = slugify(`${lead.companyName}-${lead.city || "polska"}`.toLowerCase(), {
             strict: true,
             lower: true,
           }).slice(0, 70);
@@ -168,8 +172,16 @@ export async function POST(req: Request) {
               proposedModules: offerContent.proposedModules,
               pricingRange: offerContent.pricingRange,
               processSteps: offerContent.processSteps,
-              bookingUrl: offerUrl,
+              bookingUrl: defaultSender?.bookingUrl || offerUrl,
               deployUrl: offerUrl,
+              senderName: defaultSender?.senderName || "Dariusz",
+              senderRole: defaultSender?.senderRole || "Założyciel & Strateg B2B",
+              senderEmail: defaultSender?.senderEmail || "kontakt@procentmarketing.pl",
+              senderPhone: defaultSender?.senderPhone || null,
+              senderCompany: defaultSender?.senderCompany || "Procent Marketing",
+              senderWebsite: defaultSender?.senderWebsite || "https://procentmarketing.pl",
+              customNote: defaultSender?.customNote || null,
+              ctaText: offerContent.ctaText || defaultSender?.defaultCtaText || "Umów bezpłatną konsultację",
               status: "published",
               expiresAt,
               publishedAt: new Date(),

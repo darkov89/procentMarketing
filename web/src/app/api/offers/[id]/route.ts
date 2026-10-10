@@ -39,6 +39,10 @@ export async function POST(
       senderWebsite: "https://procentmarketing.pl",
       bookingUrl: "https://cal.com/procentmarketing/15min",
       customNote: "W razie pytań technicznych dotyczących wstępnej analizy, zapraszam do bezpośredniego kontaktu.",
+      companyDescription: "Procent Marketing — agencja automatyzacji marketingu i pozyskiwania klientów B2B. Dzielimy się zyskiem 50/50 ze zleceń (Success Fee) lub pracujemy w elastycznych modelach stałych (godzinowo / projektowo / abonament).",
+      pricingModel: "rev_share",
+      pricingCustomRate: "50% podział zysku (Success Fee)",
+      defaultCtaText: "Sprawdź warunki współpracy",
     };
 
     // Either use manually provided offer content from UI editor or generate with Gemini AI
@@ -49,12 +53,12 @@ export async function POST(
         heroObservation: body.heroObservation,
         observations: body.observations || [],
         proposedModules: body.proposedModules || [],
-        pricingRange: body.pricingRange || "od 2 800 zł / mies.",
+        pricingRange: body.pricingRange !== undefined ? body.pricingRange : (defaultSender.pricingCustomRate || ""),
         processSteps: body.processSteps || [],
-        ctaText: body.ctaText || "Umów bezpłatną konsultację",
+        ctaText: body.ctaText || defaultSender.defaultCtaText || "Umów bezpłatną konsultację",
       };
     } else {
-      offerContent = await generateOfferContent(lead, lead.audit);
+      offerContent = await generateOfferContent(lead, lead.audit, { senderProfile: defaultSender });
     }
 
     const safeSlug = slugify(`${lead.companyName}-${lead.city || "polska"}`.toLowerCase(), {
@@ -224,13 +228,13 @@ export async function PUT(
         observationsEvidence: body.observationsEvidence !== undefined ? body.observationsEvidence : lead.offer.observationsEvidence,
         processSteps: body.processSteps !== undefined ? body.processSteps : lead.offer.processSteps,
         bookingUrl: body.bookingUrl !== undefined ? body.bookingUrl : lead.offer.bookingUrl,
-        senderName: body.senderName !== undefined ? body.senderName : lead.offer.senderName,
-        senderRole: body.senderRole !== undefined ? body.senderRole : lead.offer.senderRole,
-        senderEmail: body.senderEmail !== undefined ? body.senderEmail : lead.offer.senderEmail,
-        senderPhone: body.senderPhone !== undefined ? body.senderPhone : lead.offer.senderPhone,
-        senderCompany: body.senderCompany !== undefined ? body.senderCompany : lead.offer.senderCompany,
-        senderWebsite: body.senderWebsite !== undefined ? body.senderWebsite : lead.offer.senderWebsite,
-        customNote: body.customNote !== undefined ? body.customNote : lead.offer.customNote,
+        senderName: body.senderName !== undefined ? body.senderName : (body.authorSignature?.name !== undefined ? body.authorSignature.name : lead.offer.senderName),
+        senderRole: body.senderRole !== undefined ? body.senderRole : (body.authorSignature?.role !== undefined ? body.authorSignature.role : lead.offer.senderRole),
+        senderEmail: body.senderEmail !== undefined ? body.senderEmail : (body.authorSignature?.email !== undefined ? body.authorSignature.email : lead.offer.senderEmail),
+        senderPhone: body.senderPhone !== undefined ? body.senderPhone : (body.authorSignature?.phone !== undefined ? body.authorSignature.phone : lead.offer.senderPhone),
+        senderCompany: body.senderCompany !== undefined ? body.senderCompany : (body.authorSignature?.company !== undefined ? body.authorSignature.company : lead.offer.senderCompany),
+        senderWebsite: body.senderWebsite !== undefined ? body.senderWebsite : (body.authorSignature?.website !== undefined ? body.authorSignature.website : lead.offer.senderWebsite),
+        customNote: body.customNote !== undefined ? body.customNote : (body.authorSignature?.note !== undefined ? body.authorSignature.note : lead.offer.customNote),
       })
       .where(eq(offers.id, lead.offer.id))
       .returning();

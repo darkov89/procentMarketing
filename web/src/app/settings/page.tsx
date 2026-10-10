@@ -66,6 +66,10 @@ function SettingsPageContent() {
     senderWebsite: "https://procentmarketing.pl",
     bookingUrl: "https://cal.com/procentmarketing/15min",
     customNote: "W razie pytań technicznych dotyczących wstępnej analizy, zapraszam do bezpośredniego kontaktu.",
+    companyDescription: "Procent Marketing — agencja automatyzacji pozyskiwania klientów i sprzedaży B2B. Specjalizujemy się w lejkach, dedykowanych stronach ofertowych, narzędziach rezerwacji 24/7 i analityce ROI. Dzielimy się zyskiem 50/50 ze zleceń lub oferujemy elastyczne modele stałe.",
+    pricingModel: "rev_share",
+    pricingCustomRate: "50% podział zysku (Success Fee)",
+    defaultCtaText: "Sprawdź warunki współpracy",
   });
   const [senderProfileLoading, setSenderProfileLoading] = useState(false);
 

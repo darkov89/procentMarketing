@@ -1,5 +1,5 @@
-import { db, jobs, leads, audits, offers, messages, evidence } from "@/lib/db";
-import { eq, sql } from "drizzle-orm";
+import { db, jobs, leads, audits, offers, messages, evidence, appSettings } from "@/lib/db";
+import { eq, sql, and } from "drizzle-orm";
 import { auditWebsite } from "./auditor";
 import { qualifyLead } from "./qualifier";
 import { generateOfferContent } from "./gemini";
@@ -172,8 +172,12 @@ export async function executeJob(job: typeof jobs.$inferSelect): Promise<{ succe
       const lead = await db.query.leads.findFirst({ where: eq(leads.id, leadId), with: { audit: true, offer: true } });
       if (!lead) return { success: false, error: "Lead nie istnieje" };
 
-      const offerContent = await generateOfferContent(lead, lead.audit);
-      const safeSlug = slugify(`${lead.companyName}-${lead.city || "legnica"}`.toLowerCase(), { strict: true, lower: true }).slice(0, 70);
+      const senderSetting = await db.query.appSettings.findFirst({
+        where: and(eq(appSettings.tenantId, lead.tenantId), eq(appSettings.key, "sender_profile")),
+      });
+      const defaultSender = senderSetting?.value as any;
+      const offerContent = await generateOfferContent(lead, lead.audit, { senderProfile: defaultSender });
+      const safeSlug = slugify(`${lead.companyName}-${lead.city || "polska"}`.toLowerCase(), { strict: true, lower: true }).slice(0, 70);
       const secureToken = crypto.randomBytes(16).toString("hex");
       const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
       const offerUrl = `/o/${secureToken}`;
@@ -210,8 +214,16 @@ export async function executeJob(job: typeof jobs.$inferSelect): Promise<{ succe
         proposedModules: offerContent.proposedModules,
         pricingRange: offerContent.pricingRange,
         processSteps: offerContent.processSteps,
-        bookingUrl: offerUrl,
+        bookingUrl: defaultSender?.bookingUrl || offerUrl,
         deployUrl: offerUrl,
+        senderName: defaultSender?.senderName || "Dariusz",
+        senderRole: defaultSender?.senderRole || "Założyciel & Strateg B2B",
+        senderEmail: defaultSender?.senderEmail || "kontakt@procentmarketing.pl",
+        senderPhone: defaultSender?.senderPhone || null,
+        senderCompany: defaultSender?.senderCompany || "Procent Marketing",
+        senderWebsite: defaultSender?.senderWebsite || "https://procentmarketing.pl",
+        customNote: defaultSender?.customNote || null,
+        ctaText: offerContent.ctaText || defaultSender?.defaultCtaText || "Umów bezpłatną konsultację",
         status: "published",
         expiresAt,
         publishedAt: new Date(),

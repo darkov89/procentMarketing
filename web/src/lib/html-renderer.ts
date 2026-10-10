@@ -11,6 +11,86 @@ export interface SenderInfo {
   bookingUrl?: string | null;
 }
 
+export function resolvePricingPresentation(
+  pricingRange?: string | null,
+  customCta?: string | null
+): { tag: string; amount: string; description: string; cta: string } {
+  const raw = (pricingRange || "").trim();
+  const lower = raw.toLowerCase();
+
+  const isIndividualOrEmpty =
+    !raw ||
+    lower.includes("indywidualna") ||
+    lower.includes("sprawdź ceny") ||
+    lower.includes("sprawdz ceny") ||
+    lower.includes("bez ceny") ||
+    lower.includes("do ustalenia") ||
+    lower === "null" ||
+    lower === "undefined";
+
+  if (isIndividualOrEmpty) {
+    return {
+      tag: "Model współpracy",
+      amount: "Wycena indywidualna",
+      description:
+        "Zakres prac oraz elastyczny model rozliczenia (podział zyskiem 50/50, stawka za wykonanie lub abonament) ustalamy precyzyjnie po krótkiej 15-minutowej rozmowie.",
+      cta: customCta && customCta.trim() ? customCta : "Sprawdź ceny & Porozmawiajmy",
+    };
+  }
+
+  // Model rev-share / % zysku (np. 50/50 - Procent Marketing)
+  if (
+    lower.includes("%") ||
+    lower.includes("zyskiem") ||
+    lower.includes("zysku") ||
+    lower.includes("prowiz") ||
+    lower.includes("success")
+  ) {
+    return {
+      tag: "Model prowizyjny & Podział zysku (Success Fee)",
+      amount: raw,
+      description:
+        "Dzielimy się wygenerowanym zyskiem (np. pół na pół). Zarabiamy wyłącznie wtedy, gdy wdrożone rozwiązania generują realne przychody dla Twojej firmy.",
+      cta: customCta && customCta.trim() ? customCta : "Sprawdź warunki współpracy",
+    };
+  }
+
+  // Stawka godzinowa
+  if (lower.includes("/ godz") || lower.includes("/ h") || lower.includes("/h") || lower.includes("godzin")) {
+    return {
+      tag: "Stawka godzinowa (Time & Material)",
+      amount: raw,
+      description:
+        "Transparentne rozliczenie za faktycznie przepracowany czas specjalistów bez długoterminowych zobowiązań.",
+      cta: customCta && customCta.trim() ? customCta : "Porozmawiajmy o wycenie",
+    };
+  }
+
+  // Za wykonanie / Projekt
+  if (
+    lower.includes("projekt") ||
+    lower.includes("jednorazowo") ||
+    lower.includes("wykonani") ||
+    lower.includes("wdrożeni")
+  ) {
+    return {
+      tag: "Inwestycja wdrożeniowa (Projekt)",
+      amount: raw,
+      description:
+        "Kompleksowe wdrożenie systemu z gwarancją zakresu prac i wsparciem powdrożeniowym.",
+      cta: customCta && customCta.trim() ? customCta : "Sprawdź zakres & wycenę",
+    };
+  }
+
+  // Domyślnie miesięczna lub podana kwota
+  return {
+    tag: lower.includes("mies") ? "Inwestycja miesięczna" : "Inwestycja",
+    amount: raw,
+    description: "Bez długoterminowych cyrografów. Rozliczamy się za realne wdrożenia i wzrost zapytań.",
+    cta: customCta && customCta.trim() ? customCta : "Umów bezpłatną konsultację",
+  };
+}
+
 export function renderOfferPage(
   offer: OfferContent,
   lead: { companyName: string; city?: string | null },
@@ -27,6 +107,8 @@ export function renderOfferPage(
   const authorWebsite = sender?.website || "https://procentmarketing.pl";
   const customNote = sender?.customNote || null;
   const initials = authorName.trim() ? authorName.trim().charAt(0).toUpperCase() : "%";
+
+  const pricing = resolvePricingPresentation(offer.pricingRange, offer.ctaText);
 
   const observationsHtml = offer.observations
     .map(
@@ -437,12 +519,12 @@ export function renderOfferPage(
         </section>
 
         <section class="pricing-box">
-            <div class="pricing-tag">Inwestycja miesięczna</div>
-            <div class="price-amount">${offer.pricingRange}</div>
+            <div class="pricing-tag">${pricing.tag}</div>
+            <div class="price-amount">${pricing.amount}</div>
             <p style="color: var(--text-secondary); margin-bottom: 30px; max-width: 500px; margin-left: auto; margin-right: auto;">
-                Bez długoterminowych cyrografów. Rozliczamy się za realne wdrożenia i wzrost zapytań.
+                ${pricing.description}
             </p>
-            <a href="${effectiveBookingUrl}" target="_blank" class="cta-btn">${offer.ctaText} →</a>
+            <a href="${effectiveBookingUrl}" target="_blank" class="cta-btn">${pricing.cta} →</a>
         </section>
 
         <section class="author-card">

@@ -79,5 +79,57 @@ describe("Offer Editor & Sender Profile Tests", () => {
     assert.ok(DEFAULT_SENDER_PROFILE.senderRole);
     assert.ok(DEFAULT_SENDER_PROFILE.senderCompany);
     assert.ok(DEFAULT_SENDER_PROFILE.bookingUrl.startsWith("http"));
+    assert.ok(DEFAULT_SENDER_PROFILE.companyDescription);
+    assert.equal(DEFAULT_SENDER_PROFILE.pricingModel, "rev_share");
+    assert.ok(DEFAULT_SENDER_PROFILE.pricingCustomRate?.includes("50%"));
+  });
+
+  it("renders rev-share (50% podział zysku) pricing model properly", () => {
+    const revShareOffer = {
+      ...dummyOffer,
+      pricingRange: "50% podział zysku (Success Fee)",
+      ctaText: "Sprawdź warunki współpracy",
+    };
+
+    const html = renderOfferPage(revShareOffer, dummyLead, "testowa");
+    assert.ok(html.includes("Model prowizyjny &amp; Podział zysku (Success Fee)") || html.includes("Model prowizyjny & Podział zysku (Success Fee)"));
+    assert.ok(html.includes("50% podział zysku (Success Fee)"));
+    assert.ok(html.includes("Dzielimy się wygenerowanym zyskiem"));
+    assert.ok(html.includes("Sprawdź warunki współpracy"));
+  });
+
+  it("renders hourly and fixed project models properly", () => {
+    // Hourly
+    const hourlyOffer = {
+      ...dummyOffer,
+      pricingRange: "180 zł / godz.",
+      ctaText: "Zapytaj o wycenę",
+    };
+    const htmlHourly = renderOfferPage(hourlyOffer, dummyLead, "testowa");
+    assert.ok(htmlHourly.includes("Stawka godzinowa (Time &amp; Material)") || htmlHourly.includes("Stawka godzinowa (Time & Material)"));
+    assert.ok(htmlHourly.includes("180 zł / godz."));
+
+    // Project
+    const projectOffer = {
+      ...dummyOffer,
+      pricingRange: "od 3 500 zł za wdrożenie",
+      ctaText: "Sprawdź zakres prac",
+    };
+    const htmlProj = renderOfferPage(projectOffer, dummyLead, "testowa");
+    assert.ok(htmlProj.includes("Inwestycja wdrożeniowa (Projekt)"));
+    assert.ok(htmlProj.includes("od 3 500 zł za wdrożenie"));
+  });
+
+  it("renders empty pricing as 'Wycena indywidualna' and 'Sprawdź ceny' without fake numbers", () => {
+    const noPriceOffer = {
+      ...dummyOffer,
+      pricingRange: "",
+      ctaText: "Sprawdź ceny",
+    };
+    const html = renderOfferPage(noPriceOffer, dummyLead, "testowa");
+    assert.ok(html.includes("Model współpracy"));
+    assert.ok(html.includes("Wycena indywidualna"));
+    assert.ok(html.includes("Sprawdź ceny"));
+    assert.ok(!html.includes("2 800"));
   });
 });

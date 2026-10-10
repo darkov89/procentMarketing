@@ -28,16 +28,15 @@ export function DossierOfferStudioTab({
   const [formData, setFormData] = useState({
     title: offer?.title || "",
     heroObservation: offer?.heroObservation || "",
-    customPitch: offer?.customPitch || "",
-    ctaText: offer?.ctaText || "",
-    ctaButtonText: offer?.ctaButtonText || "Porozmawiajmy o wdrożeniu",
-    authorName: offer?.authorSignature?.name || "",
-    authorRole: offer?.authorSignature?.role || "",
-    authorCompany: offer?.authorSignature?.company || "",
-    authorPhone: offer?.authorSignature?.phone || "",
-    authorEmail: offer?.authorSignature?.email || "",
-    authorWebsite: offer?.authorSignature?.website || "",
-    authorNote: offer?.authorSignature?.note || "",
+    pricingRange: (offer as any)?.pricingRange || "",
+    ctaText: (offer as any)?.ctaText || offer?.ctaText || "Umów bezpłatną konsultację",
+    authorName: (offer as any)?.senderName || offer?.authorSignature?.name || "",
+    authorRole: (offer as any)?.senderRole || offer?.authorSignature?.role || "",
+    authorCompany: (offer as any)?.senderCompany || offer?.authorSignature?.company || "",
+    authorPhone: (offer as any)?.senderPhone || offer?.authorSignature?.phone || "",
+    authorEmail: (offer as any)?.senderEmail || offer?.authorSignature?.email || "",
+    authorWebsite: (offer as any)?.senderWebsite || offer?.authorSignature?.website || "",
+    authorNote: (offer as any)?.customNote || offer?.authorSignature?.note || "",
   });
 
   if (!offer) {
@@ -80,9 +79,15 @@ export function DossierOfferStudioTab({
         body: JSON.stringify({
           title: formData.title,
           heroObservation: formData.heroObservation,
-          customPitch: formData.customPitch,
+          pricingRange: formData.pricingRange,
           ctaText: formData.ctaText,
-          ctaButtonText: formData.ctaButtonText,
+          senderName: formData.authorName,
+          senderRole: formData.authorRole,
+          senderCompany: formData.authorCompany,
+          senderPhone: formData.authorPhone,
+          senderEmail: formData.authorEmail,
+          senderWebsite: formData.authorWebsite,
+          customNote: formData.authorNote,
           authorSignature: {
             name: formData.authorName,
             role: formData.authorRole,
@@ -96,7 +101,7 @@ export function DossierOfferStudioTab({
       });
       const data = await res.json();
       if (data.success) {
-        showToast("Zapisano zmiany w ofercie i podpisie autora!", "success");
+        showToast("Zapisano zmiany w ofercie, cenniku i podpisie autora!", "success");
         onRefresh();
       } else {
         showToast(data.error || "Błąd zapisu oferty", "error");
@@ -201,10 +206,153 @@ export function DossierOfferStudioTab({
             </div>
           </div>
 
+          {/* Pricing & Business Model */}
+          <div className="bg-[#141C2E] p-5 rounded-xl border border-[#28354D] space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600]">
+                2. Cennik & Model Rozliczenia
+              </h4>
+              <span className="text-[11px] text-[#94A3B8]">
+                Dopasuj model rozliczenia lub pozostaw puste, aby wyświetlić tylko &quot;Sprawdź ceny&quot;
+              </span>
+            </div>
+
+            {/* Quick model presets */}
+            <div>
+              <label className="block text-xs font-bold text-[#94A3B8] mb-1.5">
+                Szybki wybór modelu współpracy:
+              </label>
+              <div className="flex flex-wrap gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData({
+                      ...formData,
+                      pricingRange: "50% podział zysku (Success Fee)",
+                      ctaText: "Sprawdź warunki współpracy",
+                    })
+                  }
+                  className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white px-2.5 py-1.5 rounded-lg font-medium transition-all"
+                >
+                  💼 % Zysku (50/50)
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData({
+                      ...formData,
+                      pricingRange: "180 zł / godz.",
+                      ctaText: "Zapytaj o wycenę",
+                    })
+                  }
+                  className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white px-2.5 py-1.5 rounded-lg font-medium transition-all"
+                >
+                  ⏱️ Stawka godzinowa
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData({
+                      ...formData,
+                      pricingRange: "od 3 500 zł za wdrożenie",
+                      ctaText: "Sprawdź zakres prac",
+                    })
+                  }
+                  className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white px-2.5 py-1.5 rounded-lg font-medium transition-all"
+                >
+                  📦 Za wykonanie / Projekt
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData({
+                      ...formData,
+                      pricingRange: "od 2 500 zł / mies.",
+                      ctaText: "Umów bezpłatną konsultację",
+                    })
+                  }
+                  className="bg-[#1E293B] hover:bg-[#2D3D58] border border-[#334155] text-white px-2.5 py-1.5 rounded-lg font-medium transition-all"
+                >
+                  📅 Abonament miesięczny
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFormData({
+                      ...formData,
+                      pricingRange: "",
+                      ctaText: "Sprawdź ceny",
+                    })
+                  }
+                  className="bg-[#2A1D0E] hover:bg-[#3D2B14] border border-[#F59E0B]/50 text-[#F59E0B] px-2.5 py-1.5 rounded-lg font-bold transition-all"
+                >
+                  🔍 Tylko &quot;Sprawdź ceny&quot; (bez kwot)
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div>
+                <label className="block text-[#94A3B8] font-bold mb-1">
+                  Widełki / Treść wyceny na ofercie
+                </label>
+                <input
+                  type="text"
+                  value={formData.pricingRange}
+                  onChange={(e) => setFormData({ ...formData, pricingRange: e.target.value })}
+                  placeholder="Pozostaw puste dla 'Sprawdź ceny' / 'Wycena indywidualna'"
+                  className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2 text-white"
+                />
+                <p className="text-[11px] text-[#64748B] mt-1">
+                  np. <code className="text-[#FFE600]">50% podział zysku</code>, <code className="text-[#FFE600]">180 zł / godz.</code>, <code className="text-[#FFE600]">od 3 500 zł</code> lub puste.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-[#94A3B8] font-bold mb-1">
+                  Tekst przycisku CTA
+                </label>
+                <input
+                  type="text"
+                  value={formData.ctaText}
+                  onChange={(e) => setFormData({ ...formData, ctaText: e.target.value })}
+                  placeholder="np. Sprawdź ceny, Umów bezpłatną konsultację"
+                  className="w-full bg-[#0A0E17] border border-[#28354D] rounded-lg px-3 py-2 text-white"
+                />
+                <p className="text-[11px] text-[#64748B] mt-1">
+                  Przycisk kierujący do rezerwacji terminu lub kontaktu.
+                </p>
+              </div>
+            </div>
+
+            {/* Status explanation */}
+            {!formData.pricingRange.trim() ? (
+              <div className="p-3 bg-amber-950/30 border border-amber-800/40 rounded-lg text-xs text-amber-300">
+                ⚡ <strong>Tryb bez podanych kwot:</strong> Na stronie oferty wyświetli się etykieta <em>&bdquo;Model współpracy&rdquo;</em>, kwota <em>&bdquo;Wycena indywidualna&rdquo;</em> oraz przycisk <em>&bdquo;{formData.ctaText || "Sprawdź ceny & Porozmawiajmy"}&rdquo;</em>.
+              </div>
+            ) : formData.pricingRange.includes("%") || formData.pricingRange.toLowerCase().includes("zysku") ? (
+              <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-lg text-xs text-emerald-300">
+                💼 <strong>Model prowizyjny / Podział zysku:</strong> Na ofercie pojawi się nagłówek <em>&bdquo;Model prowizyjny & Podział zysku (Success Fee)&rdquo;</em> oraz transparentny opis partnerski (Procent Marketing).
+              </div>
+            ) : formData.pricingRange.toLowerCase().includes("godz") ? (
+              <div className="p-3 bg-sky-950/30 border border-sky-800/40 rounded-lg text-xs text-sky-300">
+                ⏱️ <strong>Stawka godzinowa:</strong> Oferta wyświetli stawkę za godzinę z opisem rozliczenia za faktyczny czas pracy.
+              </div>
+            ) : formData.pricingRange.toLowerCase().includes("projekt") || formData.pricingRange.toLowerCase().includes("wykonani") ? (
+              <div className="p-3 bg-purple-950/30 border border-purple-800/40 rounded-lg text-xs text-purple-300">
+                📦 <strong>Za wykonanie / Projekt:</strong> Oferta wyświetli stałą kwotę wdrożenia z gwarancją zakresu prac.
+              </div>
+            ) : (
+              <div className="p-3 bg-blue-950/30 border border-blue-800/40 rounded-lg text-xs text-blue-300">
+                📅 <strong>Inwestycja miesięczna:</strong> Oferta wyświetli podaną kwotę abonamentu miesięcznego.
+              </div>
+            )}
+          </div>
+
           {/* Author signature & White label */}
           <div className="bg-[#141C2E] p-5 rounded-xl border border-[#28354D] space-y-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-[#FFE600]">
-              2. Wizytówka i Podpis Autora (White-label)
+              3. Wizytówka i Podpis Autora (White-label)
             </h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
               <div>

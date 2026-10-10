@@ -33,31 +33,7 @@ export async function scanOrCleanTestData(execute = false) {
   const allTenants = await db.select().from(tenants);
   const testTenants = allTenants.filter((t) => {
     if (PROTECTED_TENANT_SLUGS.includes(t.slug)) return false;
-    const isTestSlug =
-      t.slug.startsWith("a1-tenant-") ||
-      t.slug.startsWith("a3-tenant-") ||
-      t.slug.startsWith("a5-tenant-") ||
-      t.slug.startsWith("a11-tenant-") ||
-      t.slug.startsWith("pke-gate-test-") ||
-      t.slug.startsWith("call-schedule-test-") ||
-      t.slug.startsWith("finance-test-") ||
-      t.slug.startsWith("sup-tenant-") ||
-      t.slug.startsWith("unsub-tenant-") ||
-      t.slug.startsWith("p10-gdpr-") ||
-      t.slug.startsWith("p10-retention-") ||
-      t.slug.startsWith("tenant-agency-") ||
-      t.slug.startsWith("tenant-ngo-") ||
-      t.slug.startsWith("test-tenant-") ||
-      t.slug.includes("-test-") ||
-      t.name.includes("Test Tenant") ||
-      t.name.includes("Idempotency Tenant") ||
-      t.name.includes("GDPR Test") ||
-      t.name.includes("Retention Policy") ||
-      t.name.includes("Unsubscribe Test") ||
-      t.name.includes("SMTP Retry") ||
-      t.name.includes("Refusal Tenant") ||
-      t.name.includes("Finance Tenant");
-    return isTestSlug;
+    return true; // Any tenant outside protected production tenants is considered a test tenant
   });
 
   const testTenantIds = testTenants.map((t) => t.id);

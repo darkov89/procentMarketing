@@ -12,6 +12,10 @@ export interface SenderProfile {
   senderWebsite: string;
   bookingUrl: string;
   customNote: string;
+  companyDescription?: string;
+  pricingModel?: "rev_share" | "hourly" | "fixed_project" | "monthly" | "custom";
+  pricingCustomRate?: string;
+  defaultCtaText?: string;
 }
 
 export const DEFAULT_SENDER_PROFILE: SenderProfile = {
@@ -23,6 +27,10 @@ export const DEFAULT_SENDER_PROFILE: SenderProfile = {
   senderWebsite: "https://procentmarketing.pl",
   bookingUrl: "https://cal.com/procentmarketing/15min",
   customNote: "W razie pytań technicznych dotyczących wstępnej analizy, zapraszam do bezpośredniego kontaktu.",
+  companyDescription: "Procent Marketing — agencja automatyzacji pozyskiwania klientów i sprzedaży B2B. Specjalizujemy się w lejkach sprzedażowych, dedykowanych stronach ofertowych, wdrażaniu narzędzi do rezerwacji 24/7 oraz zaawansowanej analityce konwersji ROI. Dzielimy się zyskiem 50/50 ze zleceń (Success Fee) lub pracujemy w elastycznych modelach stałych (godzinowo / projektowo / abonament).",
+  pricingModel: "rev_share",
+  pricingCustomRate: "50% podział zysku (Success Fee)",
+  defaultCtaText: "Sprawdź warunki współpracy",
 };
 
 export async function GET() {
@@ -71,6 +79,10 @@ export async function POST(req: Request) {
       senderWebsite: body.senderWebsite || DEFAULT_SENDER_PROFILE.senderWebsite,
       bookingUrl: body.bookingUrl || DEFAULT_SENDER_PROFILE.bookingUrl,
       customNote: body.customNote !== undefined ? body.customNote : DEFAULT_SENDER_PROFILE.customNote,
+      companyDescription: body.companyDescription !== undefined ? body.companyDescription : DEFAULT_SENDER_PROFILE.companyDescription,
+      pricingModel: body.pricingModel || DEFAULT_SENDER_PROFILE.pricingModel,
+      pricingCustomRate: body.pricingCustomRate !== undefined ? body.pricingCustomRate : DEFAULT_SENDER_PROFILE.pricingCustomRate,
+      defaultCtaText: body.defaultCtaText || DEFAULT_SENDER_PROFILE.defaultCtaText,
     };
 
     const existing = await db.query.appSettings.findFirst({

@@ -488,13 +488,27 @@ describe("Phase 9 Acceptance Tests (Brief Scenarios A1-A12 & Presets)", () => {
       .values({ slug, name: "A8 Batch Tenant" })
       .returning();
 
+    const [testPlaybook] = await db
+      .insert(playbooks)
+      .values({ tenantId: testTenant.id, name: "Playbook A8" })
+      .returning();
+
+    const [pbVer] = await db
+      .insert(playbookVersions)
+      .values({
+        playbookId: testPlaybook.id,
+        version: 1,
+        definition: SPONSORSHIP_FUNDRAISING_PRESET,
+      })
+      .returning();
+
     const [camp] = await db
       .insert(campaigns)
       .values({
         tenantId: testTenant.id,
         name: "Kampania A8",
         status: "active",
-        playbookVersionId: 2, // sponsorship_fundraising preset (requires approved batch)
+        playbookVersionId: pbVer.id, // sponsorship_fundraising preset (requires approved batch)
         testMode: true,
       })
       .returning();
@@ -555,6 +569,8 @@ describe("Phase 9 Acceptance Tests (Brief Scenarios A1-A12 & Presets)", () => {
     await db.delete(leads).where(eq(leads.id, testLead.id));
     await db.delete(batches).where(eq(batches.id, draftBatch.id));
     await db.delete(campaigns).where(eq(campaigns.id, camp.id));
+    await db.delete(playbookVersions).where(eq(playbookVersions.id, pbVer.id));
+    await db.delete(playbooks).where(eq(playbooks.id, testPlaybook.id));
     await db.delete(tenants).where(eq(tenants.id, testTenant.id));
   });
 

@@ -28,6 +28,20 @@ export interface OfferContent {
   ctaText: string;
 }
 
+export interface GenerateOfferOptions {
+  senderProfile?: {
+    senderCompany?: string;
+    companyDescription?: string;
+    pricingModel?: "rev_share" | "hourly" | "fixed_project" | "monthly" | "custom";
+    pricingCustomRate?: string;
+    defaultCtaText?: string;
+    senderName?: string;
+    senderRole?: string;
+  } | null;
+  pricingRange?: string | null;
+  ctaText?: string | null;
+}
+
 export async function generateOfferContent(
   lead: {
     companyName: string;
@@ -46,9 +60,48 @@ export async function generateOfferContent(
     hasContactForm?: boolean | null;
     metaAdsActive?: boolean | null;
     rawEvidence?: unknown;
-  } | null
+  } | null,
+  options?: GenerateOfferOptions
 ): Promise<OfferContent> {
   const apiKey = process.env.GEMINI_API_KEY;
+
+  const senderProf = options?.senderProfile;
+  const offeringCompany = senderProf?.senderCompany?.trim() || "Procent Marketing";
+  const offeringDescription =
+    senderProf?.companyDescription?.trim() ||
+    "Procent Marketing — agencja automatyzacji pozyskiwania klientów i sprzedaży B2B. Specjalizujemy się w lejkach sprzedażowych, dedykowanych stronach ofertowych, wdrażaniu narzędzi do rezerwacji 24/7 oraz zaawansowanej analityce konwersji ROI. Oferujemy elastyczne modele współpracy — w tym model partnerski 50/50 zyskiem z wygenerowanych zleceń (Success Fee), stawkę godzinową, stałą kwotę za projekt lub miesięczny abonament.";
+
+  const pricingModel = senderProf?.pricingModel || "rev_share";
+  const customRate = options?.pricingRange !== undefined ? options.pricingRange : senderProf?.pricingCustomRate;
+
+  let pricingRangeValue = "";
+  let defaultCta = options?.ctaText || senderProf?.defaultCtaText || "Umów 15-minutową bezpłatną konsultację";
+  let pricingInstruction = "";
+
+  if (customRate && customRate.trim().length > 0) {
+    pricingRangeValue = customRate.trim();
+    pricingInstruction = `Ustal parametr "pricingRange" na dokładnie: "${pricingRangeValue}".`;
+  } else if (pricingModel === "rev_share") {
+    pricingRangeValue = "50% podział zysku (Success Fee)";
+    pricingInstruction = `Model współpracy: 50% podział zysku (Success Fee) z wygenerowanych zleceń. Ustaw "pricingRange" na "${pricingRangeValue}".`;
+    if (!options?.ctaText && !senderProf?.defaultCtaText) defaultCta = "Sprawdź warunki współpracy";
+  } else if (pricingModel === "hourly") {
+    pricingRangeValue = "180 zł / godz.";
+    pricingInstruction = `Model współpracy: Transparentna stawka godzinowa. Ustaw "pricingRange" na "${pricingRangeValue}".`;
+    if (!options?.ctaText && !senderProf?.defaultCtaText) defaultCta = "Zapytaj o wycenę";
+  } else if (pricingModel === "fixed_project") {
+    pricingRangeValue = "od 3 500 zł za wdrożenie";
+    pricingInstruction = `Model współpracy: Stała cena za wdrożenie projektu (Fixed Price). Ustaw "pricingRange" na "${pricingRangeValue}".`;
+    if (!options?.ctaText && !senderProf?.defaultCtaText) defaultCta = "Sprawdź zakres prac";
+  } else if (pricingModel === "monthly") {
+    pricingRangeValue = "od 2 500 zł / mies.";
+    pricingInstruction = `Model współpracy: Stały abonament miesięczny z bieżącym wsparciem. Ustaw "pricingRange" na "${pricingRangeValue}".`;
+  } else {
+    // Model 'custom' lub brak ceny -> "Sprawdź ceny" (zero price guessing)
+    pricingRangeValue = "";
+    pricingInstruction = `Brak z góry ustalonej kwoty! Ustaw "pricingRange" na "" (pusty ciąg znaków) lub "Wycena indywidualna na spotkaniu". ZAKAZ zgadywania jakichkolwiek kwot lub liczb! Ustaw "ctaText" na "Sprawdź ceny".`;
+    defaultCta = "Sprawdź ceny";
+  }
 
   // Extract what the company actually does from web audit & registry
   const raw = (audit?.rawEvidence as Record<string, unknown>) || {};
@@ -71,9 +124,12 @@ export async function generateOfferContent(
   if (apiKey) {
     try {
       const ai = new GoogleGenAI({ apiKey });
-      const prompt = `Jesteś głównym strategiem pozyskiwania klientów B2B w Procent Marketing.
-Przygotuj spersonalizowaną, profesjonalną ofertę automatyzacji i pozyskiwania klientów dla firmy:
-- Nazwa: ${lead.companyName}
+      const prompt = `Jesteś głównym strategiem pozyskiwania klientów B2B w firmie: ${offeringCompany}.
+Profil firmy oferującej (${offeringCompany}):
+${offeringDescription}
+
+Twoim zadaniem jest przygotowanie spersonalizowanej, profesjonalnej oferty automatyzacji i pozyskiwania klientów dla firmy-odbiorcy:
+- Nazwa odbiorcy: ${lead.companyName}
 - Wielkość / Segment: ${companyScale}
 - Miasto i lokalizacja: ${lead.city || "Polska"}
 - Strona WWW: ${lead.website || "brak"}
@@ -98,28 +154,33 @@ TWARDE FAKTY Z AUDYTU TECHNOLOGICZNEGO:
 - Reklamy Meta Ads: ${audit?.metaAdsActive ? "Aktywny piksel" : "Brak piksela"}
 
 KLUCZOWE WYMAGANIA:
-1. OFERTA MUSI BYĆ DEDYKOWANA DO TEGO, CZYM TA FIRMA SIĘ ZAJMUJE!
-   - Nazwy proponowanych modułów muszą bezpośrednio nawiązywać do jej branży i oferty (np. dla hydraulika -> 'Kalkulator Zapytań Wod-Kan', dla serwisu -> 'Kalendarz Rezerwacji Stanowiska', dla doradcy -> 'System Kwalifikacji Klienta').
+1. OFERTA MUSI ŁĄCZYĆ TO, CO ROBI ${offeringCompany}, Z BRANŻĄ I ZDIAGNOZOWANYMI PROBLEMAMI FIRMY ${lead.companyName}!
+   - Wyjaśnij, w jaki sposób kompetencje ${offeringCompany} (generowanie leadów, automatyzacja, eliminacja strat klientów) bezpośrednio pomogą firmie ${lead.companyName}.
+   - Nazwy proponowanych modułów muszą być dedykowane (np. dla hydraulika -> 'Kalkulator Zapytań Wod-Kan', dla serwisu -> 'Kalendarz Rezerwacji Stanowiska', dla kancelarii -> 'Formularz Kwalifikacji Spraw').
    - W heroHeadline zawrzyj nazwę firmy oraz jej kluczową specjalizację${lead.city ? ` i miasto (${lead.city})` : ""}.
-2. ZAKAZ ZMYŚLANIA: Opieraj się wyłącznie na faktach z audytu i powyższym opisie działalności.
+2. CENNIK / MODEL ROZLICZENIA:
+   - ${pricingInstruction}
+3. ZAKAZ ZMYŚLANIA (ZERO HALLUCINATION):
+   - Opieraj się wyłącznie na faktach z audytu i powyższym opisie działalności.
+   - Zakaz wymyślania fikcyjnych liczb, referencji czy niezdefiniowanych cen.
 
 Zwróć odpowiedź w czystym JSON zgodnym ze schematem:
 {
   "heroHeadline": "Mocny nagłówek odnoszący się do konkretnej działalności tej firmy i miasta",
-  "heroObservation": "2-3 konkretne zdania o tym co robi firma i jakie ma luki technologiczne blokujące klientów",
+  "heroObservation": "2-3 konkretne zdania o tym co robi firma i jak ${offeringCompany} może usunąć luki technologiczne blokujące klientów",
   "observations": [
     {"finding": "Co zauważyliśmy", "impact": "Wpływ na biznes i utratę klientów", "evidenceKey": "klucz_faktu"}
   ],
   "proposedModules": [
     {"name": "Nazwa modułu dopasowana do jej branży", "description": "Krótki opis wdrożenia i korzyści", "iconEmoji": "⚡"}
   ],
-  "pricingRange": "od 2 500 do 4 500 zł / miesięcznie",
+  "pricingRange": "${pricingRangeValue || ""}",
   "processSteps": [
-    {"stepNumber": 1, "title": "Warsztat zerowy", "description": "Analiza procesów pozyskiwania klientów"},
+    {"stepNumber": 1, "title": "Warsztat zerowy", "description": "Analiza procesów pozyskiwania klientów i ustalenie modelu współpracy"},
     {"stepNumber": 2, "title": "Wdrożenie modułów", "description": "Konfiguracja narzędzi i integracja z www"},
-    {"stepNumber": 3, "title": "Skalowanie zapytań", "description": "Bieżąca optymalizacja napływu klientów"}
+    {"stepNumber": 3, "title": "Skalowanie zapytań", "description": "Bieżąca optymalizacja napływu klientów i rozliczanie za wyniki"}
   ],
-  "ctaText": "Umów 15-minutową bezpłatną konsultację"
+  "ctaText": "${defaultCta}"
 }`;
 
       const response = await ai.models.generateContent({
@@ -131,7 +192,13 @@ Zwróć odpowiedź w czystym JSON zgodnym ze schematem:
       });
 
       if (response.text) {
-        return JSON.parse(response.text) as OfferContent;
+        const parsed = JSON.parse(response.text) as OfferContent;
+        // If pricingRange was not configured, enforce clean/empty or custom label
+        if (!pricingRangeValue && (!parsed.pricingRange || parsed.pricingRange.includes("zł"))) {
+          parsed.pricingRange = "";
+          parsed.ctaText = defaultCta;
+        }
+        return parsed;
       }
     } catch (err) {
       console.warn("Gemini API call failed, falling back to deterministic offer generator:", err);
@@ -145,12 +212,12 @@ Zwróć odpowiedź w czystym JSON zgodnym ze schematem:
   if (audit?.hasOnlineBooking === false) {
     observations.push({
       finding: "Brak zintegrowanego systemu rezerwacji wizyt online 24/7",
-      impact: "Pacjenci i klienci rezygnują po godzinach pracy gabinetu, przechodząc do konkurencji z szybką rezerwacją.",
+      impact: "Klienci rezygnują po godzinach pracy firmy, przechodząc do konkurencji z szybką rezerwacją.",
       evidenceKey: "online_booking_missing",
     });
     modules.push({
       name: "Autonomiczny System Rezerwacji Wizyt 24/7",
-      description: "Integracja natychmiastowego kalendarza (Booksy/Calendly) z powiadomieniami SMS, eliminująca puste przebiegi.",
+      description: "Integracja natychmiastowego kalendarza z powiadomieniami SMS, eliminująca puste przebiegi.",
       iconEmoji: "📅",
     });
   }
@@ -176,7 +243,7 @@ Zwróć odpowiedź w czystym JSON zgodnym ze schematem:
     });
     modules.push({
       name: "Wysoko-konwertujący Formularz Leadowy",
-      description: "Dedykowany moduł szybkiego kontaktu z automatyczną notyfikacją handlowca w 60 sekund.",
+      description: "Dedykowany moduł szybkiego kontaktu z automatyczną notyfikacją w 60 sekund.",
       iconEmoji: "⚡",
     });
   }
@@ -184,12 +251,12 @@ Zwróć odpowiedź w czystym JSON zgodnym ze schematem:
   if (observations.length === 0) {
     observations.push({
       finding: "Obecna witryna posiada bazowe elementy, lecz brakuje automatyzacji leadów",
-      impact: "Potencjał wzrostu zapytań z lokalnego rynku w rejonie Legnicy pozostaje niewykorzystany.",
+      impact: "Potencjał wzrostu zapytań z rynku pozostaje niewykorzystany.",
       evidenceKey: "baseline_presence",
     });
     modules.push({
       name: "System Przechwytywania i Kwalifikacji Leadów B2B",
-      description: "Dedykowany lejek marketingowy generujący gotowe do rozmowy zapytania z regionu Legnicy.",
+      description: "Dedykowany lejek marketingowy generujący gotowe do rozmowy zapytania ofertowe.",
       iconEmoji: "🎯",
     });
   }
@@ -198,15 +265,15 @@ Zwróć odpowiedź w czystym JSON zgodnym ze schematem:
     heroHeadline: businessActivity && businessActivity.length > 5
       ? `Automatyzacja pozyskiwania klientów i zleceń: ${lead.companyName}`
       : `Skalowanie zapytań i obsługa klienta dla ${lead.companyName}`,
-    heroObservation: `Zbadaliśmy profil obecności cyfrowej firmy ${lead.companyName} (${businessActivity ? businessActivity.slice(0, 150) : lead.industry || "usługi"}) w rejonie ${lead.city || "Legnicy"}. Zidentyfikowaliśmy kluczowe wąskie gardła technologiczne ograniczające konwersję zapytań z internetu.`,
+    heroObservation: `Zbadaliśmy profil obecności cyfrowej firmy ${lead.companyName} (${businessActivity ? businessActivity.slice(0, 150) : lead.industry || "usługi"}) w rejonie ${lead.city || "Polski"}. W oparciu o profil usług ${offeringCompany} przygotowaliśmy dedykowaną architekturę usprawnień likwidującą wąskie gardła konwersji.`,
     observations,
     proposedModules: modules,
-    pricingRange: "od 2 800 zł do 4 900 zł / mies.",
+    pricingRange: pricingRangeValue,
     processSteps: [
-      { stepNumber: 1, title: "Strategia & Audyt Zerowy", description: "Mapowanie ścieżki pacjenta/klienta i konfiguracja techniczna." },
-      { stepNumber: 2, title: "Wdrożenie Automatyzacji", description: "Uruchomienie systemu rezerwacji, analityki oraz kampanii." },
-      { stepNumber: 3, title: "Optymalizacja ROI", description: "Bieżące skalowanie zapytań z gwarancją jakości w Legnicy i regionie." },
+      { stepNumber: 1, title: "Strategia & Audyt Zerowy", description: "Mapowanie ścieżki klienta i wybór modelu rozliczenia." },
+      { stepNumber: 2, title: "Wdrożenie Automatyzacji", description: "Uruchomienie dedykowanych modułów, formularzy oraz analityki." },
+      { stepNumber: 3, title: "Optymalizacja ROI", description: "Bieżące skalowanie zapytań i partnerskie rozliczenie za rezultaty." },
     ],
-    ctaText: "Umów 15-minutową bezpłatną konsultację",
+    ctaText: defaultCta,
   };
 }

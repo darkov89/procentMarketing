@@ -32,7 +32,7 @@ export default async function OfferPage({
     heroObservation: offer.heroObservation,
     observations: (offer.observationsEvidence as any[]) || [],
     proposedModules: (offer.proposedModules as any[]) || [],
-    pricingRange: offer.pricingRange || "od 2 800 zł / mies.",
+    pricingRange: offer.pricingRange || "",
     processSteps: (offer.processSteps as any[]) || [],
     ctaText: offer.ctaText || "Umów bezpłatną konsultację",
   };

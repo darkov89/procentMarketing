@@ -8,7 +8,7 @@ import { auditWebsite } from "@/lib/auditor";
 import { qualifyLead } from "@/lib/qualifier";
 import { generateOfferContent } from "@/lib/gemini";
 import { pollInboxAndProcess } from "@/lib/mail-service";
-import { db, leads, audits, offers, evidence } from "@/lib/db";
+import { db, leads, audits, offers, evidence, appSettings } from "@/lib/db";
 import { eq, and, isNotNull, inArray, lt } from "drizzle-orm";
 import { transitionLead, LeadStatus } from "@/lib/state-machine";
 import slugify from "slugify";
@@ -130,8 +130,12 @@ jobRegistry.register("generate_offer", async (job) => {
     throw new Error("Lead nie istnieje");
   }
 
-  const offerContent = await generateOfferContent(lead, lead.audit);
-  const safeSlug = slugify(`${lead.companyName}-${lead.city || "legnica"}`.toLowerCase(), { strict: true, lower: true }).slice(0, 70);
+  const senderSetting = await db.query.appSettings.findFirst({
+    where: and(eq(appSettings.tenantId, lead.tenantId), eq(appSettings.key, "sender_profile")),
+  });
+  const defaultSender = senderSetting?.value as any;
+  const offerContent = await generateOfferContent(lead, lead.audit, { senderProfile: defaultSender });
+  const safeSlug = slugify(`${lead.companyName}-${lead.city || "polska"}`.toLowerCase(), { strict: true, lower: true }).slice(0, 70);
   const secureToken = crypto.randomBytes(16).toString("hex");
   const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000);
   const offerUrl = `/o/${secureToken}`;
@@ -167,8 +171,16 @@ jobRegistry.register("generate_offer", async (job) => {
     proposedModules: offerContent.proposedModules,
     pricingRange: offerContent.pricingRange,
     processSteps: offerContent.processSteps,
-    bookingUrl: offerUrl,
+    bookingUrl: defaultSender?.bookingUrl || offerUrl,
     deployUrl: offerUrl,
+    senderName: defaultSender?.senderName || "Dariusz",
+    senderRole: defaultSender?.senderRole || "Założyciel & Strateg B2B",
+    senderEmail: defaultSender?.senderEmail || "kontakt@procentmarketing.pl",
+    senderPhone: defaultSender?.senderPhone || null,
+    senderCompany: defaultSender?.senderCompany || "Procent Marketing",
+    senderWebsite: defaultSender?.senderWebsite || "https://procentmarketing.pl",
+    customNote: defaultSender?.customNote || null,
+    ctaText: offerContent.ctaText || defaultSender?.defaultCtaText || "Umów bezpłatną konsultację",
     status: "published",
     expiresAt,
     publishedAt: new Date(),

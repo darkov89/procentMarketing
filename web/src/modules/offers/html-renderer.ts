@@ -1,4 +1,5 @@
 import { OfferContent } from "@/lib/gemini";
+import { resolvePricingPresentation } from "@/lib/html-renderer";
 
 export interface AuthorProfileInfo {
   name?: string | null;
@@ -68,21 +69,16 @@ export function renderModularOfferPage(
     )
     .join("\n");
 
-  // If price is missing or individual, present transparent note instead of artificial price tag
-  const isIndividualPricing = !offer.pricingRange || offer.pricingRange.includes("indywidualna");
+  const pricing = resolvePricingPresentation(offer.pricingRange, offer.ctaText);
 
   const pricingSectionHtml = `
     <section class="pricing-box">
-        <div class="pricing-tag">${isIndividualPricing ? "Model współpracy" : "Inwestycja miesięczna"}</div>
-        <div class="price-amount">${offer.pricingRange || "Wycena indywidualna"}</div>
+        <div class="pricing-tag">${pricing.tag}</div>
+        <div class="price-amount">${pricing.amount}</div>
         <p style="color: var(--text-secondary); margin-bottom: 30px; max-width: 500px; margin-left: auto; margin-right: auto;">
-            ${
-              isIndividualPricing
-                ? "Zakres prac oraz model rozliczenia ustalamy precyzyjnie po 15-minutowej rozmowie wstępnej."
-                : "Bez długoterminowych cyrografów. Rozliczamy się za realne wdrożenia i wzrost zapytań."
-            }
+            ${pricing.description}
         </p>
-        <a href="${effectiveBookingUrl}" target="_blank" class="cta-btn">${offer.ctaText} →</a>
+        <a href="${effectiveBookingUrl}" target="_blank" class="cta-btn">${pricing.cta} →</a>
     </section>
   `;
 
