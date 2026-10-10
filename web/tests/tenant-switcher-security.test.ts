@@ -202,4 +202,39 @@ describe("Tenant Switcher & Super Admin Security Invariants", () => {
     assert.equal(payload.toTenantId, tenantB.id);
     assert.equal(payload.isSuperAdmin, true);
   });
+
+  it("POST /api/tenants creates a new tenant with initialized playbook and campaign", async () => {
+    const { POST } = await import("../src/app/api/tenants/route");
+
+    const newTenantName = `Nowa Agencja Test ${Date.now()}`;
+    const fakeRequest = new Request("http://localhost:3000/api/tenants", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        cookie: `pm_session_token=${adminSessionToken}`,
+      },
+      body: JSON.stringify({
+        name: newTenantName,
+        presetKey: "agency_sales",
+        plan: "pro",
+      }),
+    });
+
+    const response = await POST(fakeRequest);
+    assert.equal(response.status, 200, "Tenant creation should return 200 OK");
+
+    const json = await response.json();
+    assert.equal(json.success, true);
+    assert.equal(json.tenant.name, newTenantName);
+    assert.ok(json.tenant.id);
+
+    // Verify cookie was set to the new tenant id
+    const setCookieHeader = response.headers.get("set-cookie");
+    assert.ok(setCookieHeader);
+    assert.ok(setCookieHeader.includes(ACTIVE_TENANT_COOKIE_NAME));
+    assert.ok(setCookieHeader.includes(String(json.tenant.id)));
+
+    // Cleanup the created tenant
+    await db.delete(tenants).where(eq(tenants.id, json.tenant.id));
+  });
 });

@@ -9,6 +9,7 @@ import {
   User,
   Server,
   Users,
+  Building2,
   Save,
   LayoutDashboard,
 } from "lucide-react";
@@ -17,15 +18,16 @@ import { TargetingSection, TargetingSettingsState } from "@/components/settings/
 import { SenderProfileSection, SenderProfileState } from "@/components/settings/sender-profile-section";
 import { MailAndApiSection, MailSettingsState } from "@/components/settings/mail-api-section";
 import { TeamSection, TeamUserState, InvitationState } from "@/components/settings/team-section";
+import { OrganizationsSection, TenantDetails } from "@/components/settings/organizations-section";
 
-type SettingsTab = "targeting" | "sender" | "mail" | "team";
+type SettingsTab = "targeting" | "sender" | "mail" | "team" | "organizations";
 
 function SettingsPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialTab = (searchParams.get("tab") as SettingsTab) || "targeting";
   const [activeTab, setActiveTab] = useState<SettingsTab>(
-    ["targeting", "sender", "mail", "team"].includes(initialTab) ? initialTab : "targeting"
+    ["targeting", "sender", "mail", "team", "organizations"].includes(initialTab) ? initialTab : "targeting"
   );
 
   const [toast, setToast] = useState<ToastMessage | null>(null);
@@ -115,6 +117,11 @@ function SettingsPageContent() {
   const [inviteGenerating, setInviteGenerating] = useState(false);
   const [generatedInviteUrl, setGeneratedInviteUrl] = useState<string | null>(null);
 
+  // Tenants state
+  const [tenantsList, setTenantsList] = useState<TenantDetails[]>([]);
+  const [activeTenantId, setActiveTenantId] = useState<number | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
   const fetchAllSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/settings/mail");
@@ -154,6 +161,16 @@ function SettingsPageContent() {
       if (dataTeam.success) {
         setInvitationsList(dataTeam.invitations || []);
         setTeamUsersList(dataTeam.users || []);
+      }
+    } catch {}
+
+    try {
+      const resTenants = await fetch("/api/tenants");
+      const dataTenants = await resTenants.json();
+      if (dataTenants.success) {
+        setTenantsList(dataTenants.tenants || []);
+        setActiveTenantId(dataTenants.activeTenantId ?? null);
+        setIsSuperAdmin(Boolean(dataTenants.isSuperAdmin));
       }
     } catch {}
   }, []);
@@ -507,6 +524,19 @@ function SettingsPageContent() {
             <Users size={16} />
             Zespół & Zaproszenia ({teamUsersList.length})
           </button>
+
+          <button
+            type="button"
+            onClick={() => switchTab("organizations")}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all cursor-pointer ${
+              activeTab === "organizations"
+                ? "bg-[#FFE600] text-black shadow-md font-black"
+                : "text-[#94A3B8] hover:text-white hover:bg-[#141C2E]"
+            }`}
+          >
+            <Building2 size={16} />
+            Organizacje & Tenanty ({tenantsList.length})
+          </button>
         </div>
 
         {/* Tab Contents */}
@@ -561,6 +591,15 @@ function SettingsPageContent() {
               navigator.clipboard.writeText(url);
               showToast("Skopiowano link do schowka!", "success");
             }}
+          />
+        )}
+
+        {activeTab === "organizations" && (
+          <OrganizationsSection
+            tenants={tenantsList}
+            activeTenantId={activeTenantId}
+            isSuperAdmin={isSuperAdmin}
+            onRefresh={fetchAllSettings}
           />
         )}
       </main>

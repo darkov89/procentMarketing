@@ -11,7 +11,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:check": "drizzle-kit check"
+    "db:check": "drizzle-kit check",
+    "db:clean-tests": "tsx --env-file=.env.local scripts/cleanup-test-data.ts"
   },
   "dependencies": {
     "@google/genai": "^2.24.0",

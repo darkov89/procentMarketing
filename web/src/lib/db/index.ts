@@ -7,14 +7,28 @@ const connectionString =
   process.env.DATABASE_URL ||
   "postgresql://postgres:postgres@localhost:5432/postgres";
 
-// In Node.js environments (CLI, test, serverless runtime without global WebSocket), configure ws
-if (typeof WebSocket === "undefined" && typeof globalThis.WebSocket === "undefined") {
+// In Node.js / server runtime, explicitly enforce ws WebSocket implementation for Neon
+if (typeof window === "undefined") {
   neonConfig.webSocketConstructor = ws;
 }
 
 import { sql } from "drizzle-orm";
 
-export const pool = new Pool({ connectionString });
+// Global singleton pool to prevent duplicate dead pools during Next.js hot-reload
+const globalForDb = globalThis as unknown as {
+  neonPool: Pool | undefined;
+};
+
+export const pool =
+  globalForDb.neonPool ??
+  new Pool({
+    connectionString,
+  });
+
+if (process.env.NODE_ENV !== "production") {
+  globalForDb.neonPool = pool;
+}
+
 pool.on("error", (err: unknown) => {
   // Prevent unhandled error on idle clients in WebSocket pool
   console.error("Unexpected database pool error:", err);

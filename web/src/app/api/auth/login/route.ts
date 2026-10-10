@@ -72,8 +72,20 @@ export async function POST(req: Request) {
     return response;
   } catch (err: any) {
     console.error("Login API error:", err);
+    let errorMessage = err?.message || "Błąd serwera podczas logowania";
+
+    if (!process.env.DATABASE_URL) {
+      errorMessage = "Błąd konfiguracji serwera: brak zmiennej środowiskowej DATABASE_URL w Vercel.";
+    } else if (
+      err?.message?.includes("Failed query") ||
+      err?.message?.includes("connect") ||
+      err?.name === "NeonDbError"
+    ) {
+      errorMessage = "Błąd połączenia z bazą danych (Neon). Upewnij się, że baza Neon jest aktywna i skonfigurowana w Vercel.";
+    }
+
     return NextResponse.json(
-      { success: false, error: err.message || "Błąd serwera podczas logowania" },
+      { success: false, error: errorMessage },
       { status: 500 }
     );
   }

@@ -9,7 +9,9 @@ import {
   Search,
   Sparkles,
   Loader2,
+  Plus,
 } from "lucide-react";
+import { CreateTenantModal } from "@/components/tenants/create-tenant-modal";
 
 interface TenantItem {
   id: number;
@@ -31,6 +33,7 @@ export function TenantSwitcher({ collapsed = false }: TenantSwitcherProps) {
   const [loading, setLoading] = useState(true);
   const [switchingId, setSwitchingId] = useState<number | null>(null);
   const [isOpen, setIsOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -152,6 +155,11 @@ export function TenantSwitcher({ collapsed = false }: TenantSwitcherProps) {
             {renderDropdownContent()}
           </div>
         )}
+
+        <CreateTenantModal
+          isOpen={isCreateModalOpen}
+          onClose={() => setIsCreateModalOpen(false)}
+        />
       </div>
     );
   }
@@ -192,6 +200,12 @@ export function TenantSwitcher({ collapsed = false }: TenantSwitcherProps) {
           {renderDropdownContent()}
         </div>
       )}
+
+      {/* Create Tenant Modal */}
+      <CreateTenantModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+      />
     </div>
   );
 
@@ -283,6 +297,21 @@ export function TenantSwitcher({ collapsed = false }: TenantSwitcherProps) {
               );
             })
           )}
+        </div>
+
+        {/* Action: Add New Organization */}
+        <div className="pt-2 border-t border-slate-800">
+          <button
+            type="button"
+            onClick={() => {
+              setIsOpen(false);
+              setIsCreateModalOpen(true);
+            }}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-xs font-bold text-[#FFE600] hover:text-black bg-[#FFE600]/10 hover:bg-[#FFE600] border border-dashed border-[#FFE600]/40 hover:border-transparent transition-all shadow-sm cursor-pointer"
+          >
+            <Plus size={14} className="shrink-0" />
+            <span>Dodaj nową organizację</span>
+          </button>
         </div>
 
         {/* Super Admin Notice */}
